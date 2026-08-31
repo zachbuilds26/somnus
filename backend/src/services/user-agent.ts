@@ -7,9 +7,14 @@ import { config, debug, log, warn } from '../config';
 import { saveUser, type SomnusUser } from './users';
 import { appendEntry } from './store';
 
-const notify = async (_chatId: number, _text: string): Promise<void> => {
-  // Telegram removed — kept as no-op for MCP/AI-app usage. Somnus is now
-  // usable from any AI coding app via MCP, not via Telegram.
+let notifyImpl: (chatId: number, text: string) => Promise<void> = async () => {};
+
+export function setTelegramNotifier(fn: (chatId: number, text: string) => Promise<void>): void {
+  notifyImpl = fn;
+}
+
+const notify = async (chatId: number, text: string): Promise<void> => {
+  try { await notifyImpl(chatId, text); } catch {}
 };
 import { listEventMarketRows, eventBook, nativeGasBalance } from './sdk';
 import { buildSignalContext, estimateFair } from './signal';
