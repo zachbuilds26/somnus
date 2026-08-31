@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Somnus Live</title>
+<style>body{font-family:system-ui;background:#0a0a0a;color:#fff;padding:20px} #log{white-space:pre-wrap;background:#141414;padding:12px;border-radius:8px;min-height:200px} .win{color:#00c758} .loss{color:#fb2c36} .pend{color:#f0b90b} @keyframes pulse{0%{opacity:1}50%{opacity:0.3}100%{opacity:1}} #icon{font-size:24px;vertical-align:middle}</style></head>
+<body>
+<h2>Somnus — Live Hunt <span id="icon">🔍</span> <span id="status">checking...</span></h2>
+<div id="log">waiting for bot...</div>
+<script>
+let last = 0;
+let searching = false;
+async function tick(){
+  try{
+    const h = await fetch('/api/health').then(r=>r.json());
+    const p = await fetch('/api/agent/pending').then(r=>r.json());
+    const pnl = await fetch('/api/agent/pnl').then(r=>r.json());
+    const loop = h.loop || {};
+    searching = !!loop.running;
+    document.getElementById('icon').textContent = searching ? '🔍' : '⏸️';
+    document.getElementById('icon').style.animation = searching ? 'pulse 1s infinite' : 'none';
+    document.getElementById('status').textContent = loop.running ? 'SEARCHING for signals...' : 'PAUSED';
+    let t = `Health: ${h.network} dryRun:${h.dryRun} risk:${h.risk.ok?'ok':h.risk.blocked.join(';')} feed:${h.feeds.failing?'degraded':'fresh'} loop:${loop.running?'on':'off'} cycles:${loop.cycles}\n`;
+    t += `P&L: spent $${pnl.totalFillCost} wins ${pnl.wins}/${pnl.closedTrades} winRate ${(pnl.winRate*100).toFixed(1)}% realized ${pnl.realizedPnl} open $${pnl.openCost}\n`;
+    if(p.pending.length) t += `\n🔔 PENDING ASK (${p.pending.length}):\n` + p.pending.map(x=>`  ${x.symbol} ${x.horizon} edge ${(x.edge*100).toFixed(1)}% cost $${x.cost} payout $${x.payoutIfWin} — /api/agent/confirm {id:${x.id}}`).join('\n') + '\n';
+    const logs = await fetch('/api/agent/logs?limit=5').then(r=>r.json()).then(r=>r.entries).catch(()=>[]);
+    if(logs.length) t += `\nLast decisions:\n` + logs.slice(0,3).map(e=>`  ${e.payload?.symbol||e.kind} ${e.payload?.action||''} ${e.payload?.reason||''}`.slice(0,120)).join('\n');
+    document.getElementById('log').textContent = t;
+    if(p.pending.length && p.pending.length !== last){
+      if(Notification && Notification.permission==='granted') new Notification(`Somnus: ${p.pending.length} good bet(s) — tap to confirm`);
+      else if(Notification && Notification.permission!=='denied') Notification.requestPermission();
+    }
+    last = p.pending.length;
+  }catch(e){ document.getElementById('log').textContent = 'fetch failed '+e; }
+  setTimeout(tick, 4000);
+}
+tick();
+</script>
+</body></html>

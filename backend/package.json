@@ -1,0 +1,40 @@
+{
+  "name": "@somnus/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Somnus backend: governed, auditable trading agent runtime for DreamDEX Event Contracts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "start:supervised": "tsx scripts/supervise.ts",
+    "mcp": "tsx src/mcp-server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --import ./test/env.ts --test test/*.test.ts",
+    "doctor": "tsx scripts/doctor.ts",
+    "faucet": "tsx scripts/faucet.ts",
+    "claim": "tsx scripts/claim.ts",
+    "horizon-study": "tsx scripts/horizon-study.ts",
+    "calibration": "tsx scripts/calibration.ts",
+    "luck": "tsx scripts/luck-or-bias.ts",
+    "score": "tsx scripts/score.ts",
+    "survey": "tsx scripts/market-survey.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@somnia-chain/markets-sdk": "^0.28.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "groq-sdk": "^1.6.0",
+    "telegraf": "^4.16.3",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

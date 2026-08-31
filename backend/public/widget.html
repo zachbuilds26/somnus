@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Somnus — Trade with your wallet</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Unbounded:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0a0a0b;
+        --panel: #111113;
+        --line: rgba(255, 255, 255, 0.12);
+        --text: #f4f4f5;
+        --muted: #8a8a90;
+        --good: #5ad19a;
+        --bad: #e5706b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Space Grotesk', system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .card {
+        max-width: 460px;
+        margin: 32px auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 22px 22px 26px;
+      }
+      h1 {
+        font-family: 'Unbounded', system-ui, sans-serif;
+        font-size: 20px;
+        font-weight: 700;
+        margin: 0 0 4px;
+        letter-spacing: -0.02em;
+      }
+      .sub { color: var(--muted); margin: 0 0 18px; font-size: 12.5px; }
+      .row { display: flex; gap: 10px; margin: 10px 0; }
+      button {
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        background: #1b1b1e;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 14px;
+        cursor: pointer;
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      button:hover { border-color: rgba(255, 255, 255, 0.4); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.primary { background: #f4f4f5; color: #0a0a0b; border-color: #f4f4f5; }
+      input {
+        flex: 1;
+        font-family: inherit;
+        font-size: 13px;
+        color: var(--text);
+        background: #0d0d0f;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      input:focus { outline: none; border-color: rgba(255, 255, 255, 0.4); }
+      .addr {
+        font-size: 12px;
+        color: var(--muted);
+        word-break: break-all;
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin: 8px 0;
+      }
+      .step { color: var(--muted); font-size: 12px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.08em; }
+      .msg { font-size: 12.5px; margin: 8px 0; min-height: 16px; }
+      .msg.bad { color: var(--bad); }
+      .msg.good { color: var(--good); }
+      a { color: var(--text); }
+      .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+      .hidden { display: none; }
+      pre { background: #0d0d0f; border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 11px; max-height: 180px; overflow: auto; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Somnus</h1>
+      <p class="sub">Trade prediction markets with your own wallet. Non-custodial — we never hold your funds.</p>
+
+      <div class="row">
+        <button id="connect" class="primary">Connect Wallet</button>
+        <span id="status" class="pill">not connected</span>
+      </div>
+      <div id="addrBox" class="addr hidden"></div>
+
+      <div id="signArea" class="hidden">
+        <div class="step">1 · Sign in</div>
+        <div class="row">
+          <button id="login">Sign nonce</button>
+        </div>
+        <div id="loginMsg" class="msg"></div>
+
+        <div class="step">2 · Create a session</div>
+        <div class="row">
+          <button id="create">Create session key</button>
+          <button id="revoke" class="hidden">Revoke</button>
+        </div>
+        <div id="sessionBox" class="addr hidden"></div>
+        <div id="fundMsg" class="msg hidden"></div>
+
+        <div class="step">3 · Trade</div>
+        <div class="row">
+          <input id="trades" type="number" min="1" max="50" value="1" placeholder="trades" />
+          <input id="size" type="number" min="0.1" max="1000" step="0.1" value="3" placeholder="tUSDC each" />
+        </div>
+        <div class="row">
+          <button id="run" class="primary">Run</button>
+        </div>
+        <div id="runMsg" class="msg"></div>
+        <pre id="runOut" class="hidden"></pre>
+
+        <div class="step">P&amp;L</div>
+        <div class="row"><button id="pnl">Refresh</button></div>
+        <pre id="pnlOut" class="hidden"></pre>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const mcpSession = new URLSearchParams(location.search).get('mcpSession') || new URLSearchParams(location.search).get('mcp_session');
+      const state = { address: null, token: localStorage.getItem('somnus_jwt') || null };
+      if (mcpSession) {
+        const pill = document.getElementById('status');
+        if (pill) pill.textContent = 'AI → connect to link';
+      }
+
+      const api = (path, opts = {}) =>
+        fetch(path, {
+          ...opts,
+          headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+        }).then(async (r) => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || r.statusText);
+          return data;
+        });
+
+      const authApi = (path, body) =>
+        api(path, {
+          method: body ? 'POST' : 'GET',
+          headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+          body: body ? JSON.stringify(body) : undefined,
+        });
+
+      function setMsg(el, text, kind) {
+        $(el).textContent = text || '';
+        $(el).className = 'msg' + (kind ? ' ' + kind : '');
+      }
+
+      async function connect() {
+        if (!window.ethereum) {
+          setMsg('loginMsg', 'No wallet found. Install MetaMask or Rabby.', 'bad');
+          return;
+        }
+        try {
+          const [addr] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          state.address = addr;
+          $('addrBox').textContent = addr;
+          $('addrBox').classList.remove('hidden');
+          $('status').textContent = 'connected';
+          $('signArea').classList.remove('hidden');
+          if (state.token) $('loginMsg').textContent = 'Already signed in.';
+        } catch (e) {
+          setMsg('loginMsg', e.message, 'bad');
+        }
+      }
+
+      async function login() {
+        try {
+          const ch = await api('/api/auth/challenge', { method: 'POST', body: JSON.stringify({ address: state.address }) });
+          const signature = await window.ethereum.request({ method: 'personal_sign', params: [ch.message, state.address] });
+          const vf = await api('/api/auth/verify', { method: 'POST', body: JSON.stringify({ address: state.address, signature }) });
+          state.token = vf.token;
+          localStorage.setItem('somnus_jwt', vf.token);
+          setMsg('loginMsg', 'Signed in.', 'good');
+          if (mcpSession) {
+            try {
+              await api('/api/mcp/link', { method: 'POST', body: JSON.stringify({ mcpSession, token: vf.token }) });
+              setMsg('loginMsg', 'Signed in + linked to your AI. You can close this tab and return to chat.', 'good');
+            } catch {}
+          }
+        } catch (e) {
+          setMsg('loginMsg', e.message, 'bad');
+        }
+      }
+
+      async function createSession() {
+        try {
+          const r = await authApi('/api/user/session/create', {});
+          $('sessionBox').textContent = 'Trading wallet (fund this):\n' + r.address;
+          $('sessionBox').classList.remove('hidden');
+          $('revoke').classList.remove('hidden');
+          $('fundMsg').classList.remove('hidden');
+          $('fundMsg').innerHTML =
+            'Get testnet funds: <a href="https://faucet.somnia.network" target="_blank" rel="noreferrer">Somnia faucet</a> → send tUSDC + 0.05 STT to the address above. Then say <b>Trade $50</b> in your AI (ChatGPT, Claude, Cursor, Codex — any MCP agent).' +
+            (mcpSession ? '<br/><br/><span class="pill">Linked to your AI ✓ — close this tab and return to chat.</span>' : '');
+          setMsg('runMsg', 'Trading wallet ready — fund it, then trade in ChatGPT.', 'good');
+        } catch (e) {
+          setMsg('runMsg', e.message, 'bad');
+        }
+      }
+
+      async function revoke() {
+        try {
+          await authApi('/api/user/session/revoke', {});
+          $('sessionBox').classList.add('hidden');
+          $('revoke').classList.add('hidden');
+          setMsg('runMsg', 'Session revoked.', 'good');
+        } catch (e) {
+          setMsg('runMsg', e.message, 'bad');
+        }
+      }
+
+      async function run() {
+        const trades = Number($('trades').value);
+        const size = Number($('size').value);
+        if (!trades || !size) return setMsg('runMsg', 'Enter trades and size.', 'bad');
+        $('run').disabled = true;
+        try {
+          const r = await authApi('/api/user/run', { trades, sizePerTrade: size });
+          setMsg('runMsg', 'Cycle complete.', 'good');
+          $('runOut').textContent = JSON.stringify(r, null, 2);
+          $('runOut').classList.remove('hidden');
+        } catch (e) {
+          setMsg('runMsg', e.message, 'bad');
+        } finally {
+          $('run').disabled = false;
+        }
+      }
+
+      async function pnl() {
+        try {
+          const r = await authApi('/api/user/pnl');
+          $('pnlOut').textContent = JSON.stringify(r, null, 2);
+          $('pnlOut').classList.remove('hidden');
+        } catch (e) {
+          setMsg('runMsg', e.message, 'bad');
+        }
+      }
+
+      $('connect').onclick = connect;
+      $('login').onclick = login;
+      $('create').onclick = createSession;
+      $('revoke').onclick = revoke;
+      $('run').onclick = run;
+      $('pnl').onclick = pnl;
+    </script>
+  </body>
+</html>

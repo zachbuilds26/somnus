@@ -1,0 +1,1 @@
+import { spotPrice } from "../src/services/sdk"; import { closeAndExit } from "../src/services/sdk"; async function main() { for (const a of ["BTC","ETH"]) { try { const p = await spotPrice(a); console.log(a, p); } catch (e) { console.log(a, "ERROR:", e.message); } } } void main().then(() => closeAndExit(0)).catch((e) => { console.error("fatal:", e.message); process.exit(1); });
