@@ -55,7 +55,6 @@ const icons = {
   zap: <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
   chart: <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
   wallet: <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M16 14h2"/></svg>,
-  telegram: <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-1.9.5 4.48 4.48 0 0 0 1.95-2.4 8.94 8.94 0 0 1-2.8 1.07A4.48 4.48 0 0 0 12 15.5a12.7 12.7 0 0 1-9.2-4.6 4.48 4.48 0 0 0 1.38 5.97 4.44 4.44 0 0 1-2.03-.56v.06a4.48 4.48 0 0 0 3.6 4.4 4.5 4.5 0 0 1-2.02.08 4.48 4.48 0 0 0 4.18 3.1A9 9 0 0 1 2 19.54a12.7 12.7 0 0 0 6.88 2.02c8.26 0 12.78-6.84 12.78-12.78l-.01-.58A9.2 9.2 0 0 0 24 6.3a8.93 8.93 0 0 1-2.6.7z"/></svg>,
   globe: <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>,
   lock: <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
   arrowRight: <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>,
@@ -85,10 +84,8 @@ function StepCard({ n, title, desc }: { n: string; title: string; desc: string }
 export default function Landing({ onConnect }: { onConnect?: () => void }) {
   const [visible, setVisible] = useState(false);
   useEffect(() => { setVisible(true); }, []);
-  const tgLink = 'https://t.me/SomnusTradeBot';
   return (
     <div className="flex flex-col w-full">
-      {/* Hero — Telegram only */}
       <section className="relative w-full overflow-hidden" style={{ minHeight: 'calc(100dvh - 4rem)' }}>
         <HeroCanvas />
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24" style={{ background: 'linear-gradient(to bottom, #000, transparent)' }} />
@@ -96,86 +93,74 @@ export default function Landing({ onConnect }: { onConnect?: () => void }) {
         <div className="z-20 flex flex-col items-center justify-center absolute inset-0 px-4">
           <div className="flex flex-col gap-6 items-center text-center max-w-3xl" style={{ opacity: visible ? 1 : 0, transform: visible ? 'translateY(0)' : 'translateY(20px)', transition: 'all 0.8s ease' }}>
             <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-line-strong bg-surface/50 backdrop-blur-sm text-xs text-muted">
-              <span className="status-dot status-dot--live" /> Live on Somnia Testnet · Telegram native
+              <span className="status-dot status-dot--live" /> Live on Somnia Testnet
             </div>
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-heading leading-tight">
-              Your Telegram<br />trading bot
+              Your Web<br />Trading Agent
             </h1>
             <p className="text-lg sm:text-xl text-body max-w-xl">
-              Somnus trades DreamDEX Event Contracts on Somnia via Telegram — <span className="text-heading font-medium">per-user session wallets</span>, $1000 cap, every trade signed on-chain.
+              Somnus trades DreamDEX Event Contracts in your browser — connect wallet, set $1000 cap, every trade signed on-chain.
             </p>
             <div className="flex flex-wrap gap-3 justify-center mt-2">
-              <a href={tgLink} target="_blank" rel="noreferrer" className="btn-cta text-base">
-                Open in Telegram {icons.arrowRight}
-              </a>
-              <button onClick={onConnect} className="btn-ghost text-base">Connect Wallet</button>
-            </div>
-            <div className="flex items-center gap-2 mt-2 text-xs text-muted">
-              <span className="px-2 py-1 rounded-full border border-line">Telegram</span>
-              <span className="px-2 py-1 rounded-full border border-line">Testnet 50312</span>
-              <span className="px-2 py-1 rounded-full border border-line">Non-custodial</span>
+              <button onClick={onConnect} className="btn-cta text-base">Launch App {icons.arrowRight}</button>
+              <a href="#setup" className="btn-ghost text-base">How it works</a>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Setup — 4 steps Telegram */}
       <section id="setup" className="w-full max-w-screen-xl mx-auto px-4 py-20 sm:py-28">
         <div className="flex flex-col gap-4 mb-12">
-          <span className="text-accent text-xs font-semibold uppercase tracking-wider">Setup in 1 minute</span>
-          <h2 className="text-heading text-3xl sm:text-4xl font-bold">Start in Telegram</h2>
-          <p className="text-muted text-base max-w-xl">No MCP, no wallet extension — just Telegram. Your trading wallet is per-user and revocable.</p>
+          <span className="text-accent text-xs font-semibold uppercase tracking-wider">Setup in 30s</span>
+          <h2 className="text-heading text-3xl sm:text-4xl font-bold">Trade in your browser</h2>
+          <p className="text-muted text-base max-w-xl">No Telegram, no MCP — just web. Your wallet, your session, your cap.</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-          <StepCard n="01" title="Open bot" desc="Tap Open in Telegram → @SomnusTradeBot → /start" />
-          <StepCard n="02" title="/connect" desc="Paste testnet private key: /connect 0x... (burner funded with tUSDC + 0.02 STT via faucet.somnia.network)" />
-          <StepCard n="03" title="/trade" desc="One-tap: /trade5, /trade50, /trade1000 or /trade 27 — stays on until 5m/15m edge, IOC, $1000 max." />
-          <StepCard n="04" title="Get notified" desc="Agent DMs win/loss + profit when window settles and auto-claims winners — no /claim needed. /positions /pnl /stop anytime." />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+          <StepCard n="01" title="Connect Wallet" desc="MetaMask/Rabby on Somnia testnet 50312 → Sign nonce → session wallet 0xSession created." />
+          <StepCard n="02" title="Fund & Set Cap" desc="Send tUSDC + 0.02 STT to 0xSession via faucet.somnia.network. Cap $1000/day, $1000/trade." />
+          <StepCard n="03" title="Trade $5" desc="Click Trade $5 — stays on until 5m/15m edge ≥5%, places IOC, auto-claims win, shows win/loss + profit." />
         </div>
         <div className="mt-8 flex flex-wrap gap-3">
-          <a href={tgLink} target="_blank" rel="noreferrer" className="btn-cta text-sm">Open Bot {icons.arrowRight}</a>
-          <button onClick={onConnect} className="btn-ghost text-sm">Connect Wallet on Web</button>
+          <button onClick={onConnect} className="btn-cta text-sm">Connect Wallet {icons.arrowRight}</button>
         </div>
       </section>
 
-      {/* What it does */}
       <section className="w-full max-w-screen-xl mx-auto px-4 py-20 sm:py-28">
         <div className="flex flex-col gap-4 mb-12">
-          <span className="text-accent text-xs font-semibold uppercase tracking-wider">In Telegram</span>
-          <h2 className="text-heading text-3xl sm:text-4xl font-bold">Trade, watch, claim — DM only</h2>
+          <span className="text-accent text-xs font-semibold uppercase tracking-wider">In browser</span>
+          <h2 className="text-heading text-3xl sm:text-4xl font-bold">Scan, trade, claim — web only</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="card p-6 flex flex-col gap-3">
             <span className="text-xs uppercase tracking-wider text-accent">Trading · One-tap</span>
-            <h4 className="text-heading font-semibold">/trade5</h4>
-            <p className="text-muted text-sm">Finds 5m/15m edge, places IOC via your session wallet. Replies <span className="text-heading">Trade: BTC YES @26.6% x17 Cost $4.90 Tx 0xd2f9...</span></p>
+            <h4 className="text-heading font-semibold">Trade $5</h4>
+            <p className="text-muted text-sm">Agent finds 5m/15m edge, places IOC via session. Shows <span className="text-heading">Placed $4.90 BTC UP @0.288 tx 0x...</span></p>
           </div>
           <div className="card p-6 flex flex-col gap-3">
-            <span className="text-xs uppercase tracking-wider text-accent">Watch · Auto</span>
-            <h4 className="text-heading font-semibold">Stay-on hunter</h4>
-            <p className="text-muted text-sm">No very-sure picker — stays on until signal, retries next 5m window. 1 trade per cycle, $1000 cap.</p>
+            <span className="text-xs uppercase tracking-wider text-accent">Positions · Live</span>
+            <h4 className="text-heading font-semibold">Live P&L</h4>
+            <p className="text-muted text-sm">Open, claimable, settled. Wins auto-claimed <span className="text-heading">+990 tUSDC</span> every 30s.</p>
           </div>
           <div className="card p-6 flex flex-col gap-3">
-            <span className="text-xs uppercase tracking-wider text-accent">Settle · Auto-claim</span>
-            <h4 className="text-heading font-semibold">/positions /pnl</h4>
-            <p className="text-muted text-sm">Wins auto-claimed <span className="text-heading">+990 tUSDC tx 0x42af...</span> and DM pushed — you never ask claimable.</p>
+            <span className="text-xs uppercase tracking-wider text-accent">Proof · Signed</span>
+            <h4 className="text-heading font-semibold">Every trade on-chain</h4>
+            <p className="text-muted text-sm">Hash-chained + secp256k1. Verify at <span className="text-heading">/api/proof/verify</span> — 1700 entries.</p>
           </div>
         </div>
       </section>
 
-      {/* Features */}
       <section className="w-full max-w-screen-xl mx-auto px-4 py-20 sm:py-28">
         <div className="flex flex-col gap-4 mb-12">
           <span className="text-accent text-xs font-semibold uppercase tracking-wider">Why Somnus</span>
           <h2 className="text-heading text-3xl sm:text-4xl font-bold">Governed, not gambling</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          <FeatureCard icon={icons.brain} title="GBM fair price" desc="Driftless GBM from live spot + horizon vol. Trades only when edge vs book — 5m validated, Brier 0.189." />
-          <FeatureCard icon={icons.shield} title="Momentum breaker" desc="Skips when book collapses 8pp against you in 10m — avoids falling knife." />
-          <FeatureCard icon={icons.zap} title="IOC + STT check" desc="Crosses touch by 50% edge, capped at fair. Checks 0.02 STT before approve — no wasted gas." />
-          <FeatureCard icon={icons.chart} title="Proof chain" desc="Every decision/order hash-chained + secp256k1 signed. 1700 entries anchored — verify via /api/proof/verify." />
-          <FeatureCard icon={icons.wallet} title="Per-user session" desc="Your /connect key derives 0xSession funded with tUSDC. Operator TRADE_KEY never touches your funds. /disconnect revokes." />
-          <FeatureCard icon={icons.telegram} title="Telegram native" desc="No MCP, no extension. Just /trade in DM — your private chat is the terminal." />
+          <FeatureCard icon={icons.brain} title="GBM fair price" desc="Driftless GBM from live spot + horizon vol. Trades only when edge vs book." />
+          <FeatureCard icon={icons.shield} title="Momentum breaker" desc="Skips when book collapses 8pp against you — avoids falling knife." />
+          <FeatureCard icon={icons.zap} title="IOC + STT check" desc="Crosses 50% edge, capped at fair. Checks 0.02 STT — no wasted gas." />
+          <FeatureCard icon={icons.chart} title="Proof chain" desc="Every decision/order signed. 1700 entries anchored on-chain." />
+          <FeatureCard icon={icons.wallet} title="Per-user session" desc="Main wallet signs → 0xSession funded with tUSDC. Revoke anytime." />
+          <FeatureCard icon={icons.globe} title="Stay-on hunter" desc="Stays on until signal, retries next 5m. $1000 cap." />
         </div>
       </section>
 
@@ -183,17 +168,17 @@ export default function Landing({ onConnect }: { onConnect?: () => void }) {
         <div className="card p-8 sm:p-12 flex flex-col sm:flex-row gap-8 items-center">
           <div className="text-accent flex-shrink-0">{icons.lock}</div>
           <div className="flex flex-col gap-3">
-            <h3 className="text-heading text-2xl font-bold">Non-custodial by design</h3>
-            <p className="text-muted leading-relaxed">Session key <span className="mono text-heading">sessionPrivateKey(seed)</span> can only <span className="text-heading">buy</span> on DreamDEX — cannot transfer or approve. Fund it, trade, <span className="mono">/disconnect</span> anytime.</p>
+            <h3 className="text-heading text-2xl font-bold">Non-custodial</h3>
+            <p className="text-muted leading-relaxed">Session key <span className="mono text-heading">sessionPrivateKey</span> can only <span className="text-heading">buy</span> on DreamDEX — cannot transfer. Fund it, trade, revoke at <span className="mono">/widget</span>.</p>
           </div>
         </div>
       </section>
 
       <section className="w-full max-w-screen-xl mx-auto px-4 py-20 sm:py-28">
         <div className="flex flex-col items-center text-center gap-6">
-          <h2 className="text-heading text-3xl sm:text-4xl font-bold">Trade in Telegram</h2>
-          <p className="text-muted text-lg max-w-md">Open @SomnusTradeBot, /connect, /trade5 — stay on until edge, auto-claim.</p>
-          <a href={tgLink} target="_blank" rel="noreferrer" className="btn-cta text-base mt-2">Open in Telegram {icons.arrowRight}</a>
+          <h2 className="text-heading text-3xl sm:text-4xl font-bold">Ready to trade?</h2>
+          <p className="text-muted text-lg max-w-md">Connect wallet, fund 0xSession, Trade $5 — web only.</p>
+          <button onClick={onConnect} className="btn-cta text-base mt-2">Launch App {icons.arrowRight}</button>
         </div>
       </section>
 
@@ -201,16 +186,16 @@ export default function Landing({ onConnect }: { onConnect?: () => void }) {
         <div className="max-w-screen-xl mx-auto px-4 py-12 flex flex-col sm:flex-row justify-between gap-8">
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-2 font-semibold text-heading text-lg"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: 'linear-gradient(135deg,#ff00d5,#ff66e6)' }} /> Somnus</div>
-            <p className="text-muted text-sm max-w-xs">Telegram trading bot for DreamDEX Event Contracts — per-user wallets on Somnia testnet 50312.</p>
+            <p className="text-muted text-sm max-w-xs">Web trading bot for DreamDEX Event Contracts on Somnia testnet 50312.</p>
           </div>
           <div className="flex gap-12">
-            <div className="flex flex-col gap-3"><span className="text-heading font-semibold text-sm">Bot</span><a href={tgLink} target="_blank" rel="noreferrer" className="text-muted text-sm hover:text-heading transition-colors">Open @SomnusTradeBot</a><a href="https://somnus-bf85.onrender.com/widget" className="text-muted text-sm hover:text-heading transition-colors">Web widget</a><a href="https://somnus-bf85.onrender.com/api/health" className="text-muted text-sm hover:text-heading transition-colors">Health</a></div>
-            <div className="flex flex-col gap-3"><span className="text-heading font-semibold text-sm">Telegram</span><span className="text-muted text-sm">/connect /trade /positions /pnl /stop</span><span className="text-muted text-xs">Testnet 50312 · $1000 cap</span></div>
+            <div className="flex flex-col gap-3"><span className="text-heading font-semibold text-sm">App</span><a href="#setup" className="text-muted text-sm hover:text-heading transition-colors">Launch</a><a href="https://somnus-bf85.onrender.com/widget" className="text-muted text-sm hover:text-heading transition-colors">Widget</a><a href="https://somnus-bf85.onrender.com/api/health" className="text-muted text-sm hover:text-heading transition-colors">Health</a></div>
+            <div className="flex flex-col gap-3"><span className="text-heading font-semibold text-sm">Web</span><span className="text-muted text-sm">/widget · /api/agent/pnl</span><span className="text-muted text-xs">$1000 cap · Proof 1700</span></div>
           </div>
         </div>
         <div className="max-w-screen-xl mx-auto px-4 pb-8 flex justify-between items-center gap-4 border-t border-line pt-6">
           <span className="text-subtle text-xs">Built for Somnia × DreamDEX</span>
-          <span className="text-subtle text-xs">Non-custodial · Proof 1700</span>
+          <span className="text-subtle text-xs">Web only</span>
         </div>
       </footer>
     </div>

@@ -15,7 +15,7 @@ import { rateLimit } from './middleware/ratelimit';
 import { stopAllAgents } from './services/user-agent';
 import { maybeAutostart } from './services/loop';
 import { maybeAnchor } from './services/anchor';
-import { startTelegramBot } from './services/telegram-bot';
+
 
 const app = express();
 
@@ -131,7 +131,6 @@ export function start(): void {
   // Periodically anchor the proof-chain head on-chain so the audit trail is
   // tamper-evident externally, not just on this machine.
   setInterval(() => void maybeAnchor(), 60_000).unref?.();
-  startTelegramBot();
   // Auto-notify + autoclaim: after any trade, Telegram DM win/loss + profit and claim winners
   let lastLoserIds = new Set<string>();
   let lastClaimedIds = new Set<string>();

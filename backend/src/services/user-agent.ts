@@ -7,14 +7,8 @@ import { config, debug, log, warn } from '../config';
 import { saveUser, type SomnusUser } from './users';
 import { appendEntry } from './store';
 
-let notifyImpl: (chatId: number, text: string) => Promise<void> = async () => {};
-
-export function setTelegramNotifier(fn: (chatId: number, text: string) => Promise<void>): void {
-  notifyImpl = fn;
-}
-
-const notify = async (chatId: number, text: string): Promise<void> => {
-  try { await notifyImpl(chatId, text); } catch {}
+const notify = async (_chatId: number, _text: string): Promise<void> => {
+  // Web-only: keep as no-op, web polls /api/agent/pnl and /api/agent/claimable
 };
 import { listEventMarketRows, eventBook, nativeGasBalance } from './sdk';
 import { buildSignalContext, estimateFair } from './signal';
