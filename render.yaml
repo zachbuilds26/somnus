@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: somnus-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NETWORK
+        value: testnet
+      - key: PORT
+        value: 10000
+      - key: NODE_VERSION
+        value: 20.19.0
+      - key: DRY_RUN
+        value: true
+      - key: AGENT_MODE
+        value: dry-run
+      - key: AGENT_MAX_TRADE_SIZE
+        value: 50
+      - key: AGENT_MAX_DAILY_LOSS
+        value: 1000
+      - key: ALLOWED_ORIGINS
+        value: https://somnus-web.onrender.com,http://localhost:5173
+    autoDeploy: true
+
+  - type: web
+    name: somnus-web
+    runtime: static
+    rootDir: web
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://somnus-backend.onrender.com
