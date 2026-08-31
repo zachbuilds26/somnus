@@ -15,10 +15,7 @@ import { rateLimit } from './middleware/ratelimit';
 import { stopAllAgents } from './services/user-agent';
 import { maybeAutostart } from './services/loop';
 import { maybeAnchor } from './services/anchor';
-import { attachMcp } from './mcp-http';
 import { startTelegramBot } from './services/telegram-bot';
-import { randomUUID, createHash, createHmac } from 'node:crypto';
-import { userIdFromAuth } from './services/sessions';
 
 const app = express();
 
@@ -68,7 +65,6 @@ app.use('/api', proofRouter);
 app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 12, key: (r) => r.ip ?? 'anon', message: 'too many auth attempts — wait a minute' }));
 app.use('/api', authRouter);
 app.use('/api', userRouter);
-app.use('/mcp', rateLimit({ windowMs: 60_000, max: 120, key: (r) => r.ip ?? 'anon', message: 'MCP rate limit reached' }));
 
 // Embeddable visitor widget (Connect Wallet → fund a session → trade). Served as
 // static files plus clean URLs so it can be iframed into any site.
@@ -78,82 +74,7 @@ app.use(express.static(publicDir));
 app.get('/widget', (_req, res) => res.sendFile(widgetFile));
 app.get('/embed', (_req, res) => res.sendFile(widgetFile));
 
-// ─── OAuth discovery + PKCE for any coding agent (ChatGPT/Claude/Cursor/Codex) ───
-// Paybox-style: ChatGPT discovers via .well-known, redirects to /oauth/authorize → widget connect wallet → code → /oauth/token
-const oauthCodes = new Map<string, { userId: string; clientId: string; redirectUri: string; codeChallenge: string; codeChallengeMethod: string; scope: string; resource: string; expires: number }>();
-function baseUrl(req: import('express').Request): string {
-  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-  const host = req.headers.host ?? `127.0.0.1:${config.port}`;
-  return `${proto}://${host}`;
-}
-app.get('/.well-known/oauth-authorization-server', (req, res) => {
-  const base = baseUrl(req);
-  res.json({
-    issuer: base,
-    authorization_endpoint: `${base}/oauth/authorize`,
-    token_endpoint: `${base}/oauth/token`,
-    registration_endpoint: `${base}/oauth/register`,
-    scopes_supported: ['mcp'],
-    response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code', 'refresh_token'],
-    code_challenge_methods_supported: ['S256', 'plain'],
-    token_endpoint_auth_methods_supported: ['none'],
-  });
-});
-app.get('/.well-known/oauth-protected-resource', (req, res) => {
-  const base = baseUrl(req);
-  res.json({
-    resource: `${base}/mcp`,
-    authorization_servers: [base],
-    scopes_supported: ['mcp'],
-    bearer_methods_supported: ['header'],
-  });
-});
-app.post('/oauth/register', (req, res) => {
-  // Dynamic client registration — ChatGPT sends client_name etc. Echo back a client_id.
-  const cid = req.body?.client_id ?? `somnus-${randomUUID().slice(0, 8)}`;
-  res.json({ client_id: cid, client_name: req.body?.client_name ?? 'Somnus MCP', scope: 'mcp' });
-});
-app.get('/oauth/authorize', (req, res) => {
-  const { client_id, redirect_uri, code_challenge, code_challenge_method, state, scope, resource } = req.query as Record<string, string>;
-  if (!client_id || !redirect_uri || !code_challenge) { res.status(400).send('missing oauth params'); return; }
-  // If already authed (JWT in Authorization), show consent immediately; else redirect to widget to connect wallet
-  const auth = req.headers.authorization as string | undefined;
-  const userId = userIdFromAuth(auth ?? '');
-  if (!userId) {
-    const qs = new URLSearchParams({ oauth: '1', client_id, redirect_uri, code_challenge, code_challenge_method: code_challenge_method ?? 'S256', state: state ?? '', scope: scope ?? 'mcp', resource: resource ?? '' }).toString();
-    res.redirect(`/widget?${qs}`);
-    return;
-  }
-  // Authed — issue code and redirect back to ChatGPT
-  const code = randomUUID().replace(/-/g, '');
-  oauthCodes.set(code, { userId, clientId: client_id, redirectUri: redirect_uri, codeChallenge: code_challenge, codeChallengeMethod: code_challenge_method ?? 'S256', scope: scope ?? 'mcp', resource: resource ?? '', expires: Date.now() + 300_000 });
-  const url = new URL(redirect_uri);
-  url.searchParams.set('code', code);
-  if (state) url.searchParams.set('state', state);
-  res.redirect(url.toString());
-});
-app.post('/oauth/token', (req, res) => {
-  const { code, code_verifier, grant_type } = req.body ?? {};
-  if (grant_type !== 'authorization_code' || !code || !code_verifier) { res.status(400).json({ error: 'invalid_grant' }); return; }
-  const rec = oauthCodes.get(code);
-  if (!rec || rec.expires < Date.now()) { res.status(400).json({ error: 'invalid_grant' }); return; }
-  const calc = createHash('sha256').update(code_verifier).digest('base64url');
-  const expected = rec.codeChallengeMethod === 'plain' ? code_verifier : calc;
-  if (expected !== rec.codeChallenge) { res.status(400).json({ error: 'invalid_grant' }); return; }
-  oauthCodes.delete(code);
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const now = Math.floor(Date.now() / 1000);
-  const body = { sub: rec.userId, aud: rec.resource, scope: rec.scope, client_id: rec.clientId, iat: now, exp: now + 3600 };
-  const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  const data = `${enc(header)}.${enc(body)}`;
-  const sig = createHmac('sha256', process.env.AUTH_SECRET ?? 'dev-only-somnus-auth-secret-change-me').update(data).digest('base64url');
-  res.json({ access_token: `${data}.${sig}`, token_type: 'Bearer', expires_in: 3600, scope: rec.scope });
-});
 
-// Remote MCP endpoint — lets any coding agent or website drive Somnus over HTTP
-// (as opposed to the local stdio server used by Claude Code/Cursor/Codex locally).
-attachMcp(app);
 
 /** Body-parser failures are client errors, not server errors. A malformed JSON
  *  body was answering 500, which reads as "the backend is broken" when it was
@@ -211,55 +132,28 @@ export function start(): void {
   // tamper-evident externally, not just on this machine.
   setInterval(() => void maybeAnchor(), 60_000).unref?.();
   startTelegramBot();
-  // Auto-notify + autoclaim: after any trade, tell the agent (ChatGPT/Claude) win/loss + profit and claim winners — no manual ask.
+  // Auto-notify + autoclaim: after any trade, Telegram DM win/loss + profit and claim winners
   let lastLoserIds = new Set<string>();
   let lastClaimedIds = new Set<string>();
   setInterval(async () => {
     try {
       const { findClaimable, claimAll } = await import('./services/settlement.js');
       const scan = await findClaimable();
-      // Claim winners first — this also records settlements for losers
-      let claimed: typeof scan.claimable = [];
-      let txHash: string | undefined;
       if (scan.claimable.length > 0) {
         const ids = scan.claimable.map((c) => `${c.marketId}:${c.outcomeIdx}`).sort().join(',');
         const lastIds = [...lastClaimedIds].sort().join(',');
         if (ids !== lastIds) {
           const res = await claimAll();
-          claimed = res.claimed;
-          txHash = res.txHash;
           lastClaimedIds = new Set(scan.claimable.map((c) => `${c.marketId}:${c.outcomeIdx}`));
-          if (claimed.length > 0) {
+          if (res.claimed.length > 0) {
             const total = Number(res.totalEstPayout) / 1e6;
-            const msg = `Somnus: Won +$${total.toFixed(2)} on ${claimed.length} market(s) — claimed tx ${txHash ?? ''} — check somnus_pnl`;
-            console.error(`[somnus] ${msg}`);
-            try {
-              const { broadcastMcpMessage } = await import('./mcp-http.js');
-              broadcastMcpMessage(msg);
-            } catch {}
-            try {
-              const { broadcastStdioMessage } = await import('./mcp-server.js');
-              (broadcastStdioMessage as (m: string) => void)(msg);
-            } catch {}
+            console.error(`[somnus] auto-claimed +$${total.toFixed(2)} tx ${res.txHash ?? ''}`);
           }
         }
       }
-      // Losses — push once per newly settled loser
       const loserKey = (m: { marketId: string; outcomeIdx: number }) => `${m.marketId}:${m.outcomeIdx}`;
       const newLosers = scan.settledLosers.filter((m) => !lastLoserIds.has(loserKey(m)));
-      if (newLosers.length > 0) {
-        for (const l of newLosers) lastLoserIds.add(loserKey(l));
-        const msg = `Somnus: Lost on ${newLosers.length} market(s) ${newLosers.map((l) => l.marketId.slice(-4)).join(',')} — check somnus_pnl for total`;
-        console.error(`[somnus] ${msg}`);
-        try {
-          const { broadcastMcpMessage } = await import('./mcp-http.js');
-          broadcastMcpMessage(msg);
-        } catch {}
-        try {
-          const { broadcastStdioMessage } = await import('./mcp-server.js');
-          (broadcastStdioMessage as (m: string) => void)(msg);
-        } catch {}
-      }
+      if (newLosers.length > 0) for (const l of newLosers) lastLoserIds.add(loserKey(l));
     } catch {}
   }, 30_000).unref?.();
   // Bind to loopback by default. An API that can arm live trading must not be
