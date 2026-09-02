@@ -8,6 +8,7 @@ import { marketsRouter } from './routes/markets';
 import { agentRouter } from './routes/agent';
 import { proofRouter } from './routes/proof';
 import { metricsRouter } from './routes/metrics';
+import { mountMcp } from './mcp/http';
 import { maybeAutostart, stopLoop, waitForIdle } from './services/loop';
 import { maybeAnchor } from './services/anchor';
 import { acquireLock, LockHeldError, releaseLock } from './services/lock';
@@ -44,9 +45,24 @@ app.use(express.json({ limit: '1mb' }));
 // API is unauthenticated, but the process is bound to loopback by default (see
 // start()), so only local processes can reach it.
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** Routes exempt from the gateway key even though they use POST.
+ *
+ *  MCP is JSON-RPC: every call is a POST, including "what tools do you have?".
+ *  Gating on the HTTP method would demand a key for the handshake itself, so a
+ *  public read-only endpoint would be unreachable without handing out the key that
+ *  also authorises trading — exactly backwards.
+ *
+ *  This is safe because the exemption is not a trust decision about the caller: the
+ *  hosted MCP endpoint registers ONLY read tools (see mcp/http.ts), so there is no
+ *  privileged operation behind it to reach. Anything that spends lives in the local
+ *  stdio server, which has no HTTP surface at all. */
+const KEY_EXEMPT_PATHS = new Set(['/mcp']);
+
 if (config.apiKey) {
   app.use((req, res, next) => {
     if (!MUTATING.has(req.method)) return next();
+    if (KEY_EXEMPT_PATHS.has(req.path)) return next();
     if (req.headers['x-api-key'] === config.apiKey) return next();
     res.status(401).json({ ok: false, error: 'missing or invalid X-API-Key' });
   });
@@ -63,6 +79,9 @@ app.use('/api', proofRouter);
 // Prometheus scrape endpoint. Deliberately NOT under /api: scrapers expect /metrics
 // at the root, and it is a read-only text rendering of state /health already exposes.
 app.use(metricsRouter);
+// Read-only MCP at POST /mcp, so any coding agent can inspect this agent without a
+// key. Trading tools deliberately live only in the local stdio server.
+mountMcp(app);
 
 
 

@@ -23,4 +23,14 @@ declare module 'viem/accounts' {
   }
 
   export function privateKeyToAccount(privateKey: `0x${string}`): SomnusAccountLike;
+
+  /** A fresh secp256k1 private key from the platform CSPRNG.
+   *
+   *  Used by somnus_setup to mint a local trading wallet, so a new user never has to
+   *  paste an existing key anywhere. Declared here for the same reason as the rest of
+   *  this file: the tarball omits the declaration the exports map points at. */
+  export function generatePrivateKey(): `0x${string}`;
+
+  /** The address a private key controls, without building a full account object. */
+  export function privateKeyToAddress(privateKey: `0x${string}`): `0x${string}`;
 }

@@ -86,6 +86,56 @@ Set `SOMNUS_API_KEY` to require `X-API-Key` on mutating routes.
 
 ---
 
+## Use it from your coding agent (MCP)
+
+Somnus speaks [MCP](https://modelcontextprotocol.io), so you can drive it from Claude Code, Cursor, or anything else that speaks the protocol. There's no frontend because **your agent is the frontend** — you ask in English and it calls the tools.
+
+There are two installs, and the difference is whose wallet is at stake.
+
+### Watch mode — hosted, no key, 5 seconds
+
+```bash
+claude mcp add --transport http somnus https://somnus-backend.onrender.com/mcp
+```
+
+Twelve read-only tools. No credential, nothing to spend, nothing to steal — the hosted endpoint registers *only* the read half of the surface, so a stranger who knows the URL cannot make it trade. Ask it things like:
+
+- *"is somnus trading right now, and what's blocking it?"*
+- *"which timeframes does it actually trust, and on what evidence?"*
+- *"prove it actually placed the trades it claims"*
+
+That last one runs `somnus_proof_verify` — linkage, head match, and every signature, checked independently, with unsigned historical entries reported rather than hidden.
+
+### Trade mode — local, your own wallet, ~2 minutes
+
+```bash
+git clone https://github.com/zachbuilds26/somnus && cd somnus && npm install
+claude mcp add somnus -- npx tsx backend/src/mcp-server.ts
+```
+
+Your agent runs Somnus on **your** machine, reading **your** `backend/.env`. All 23 tools, including the 11 that move money. **Nobody hands out a private key and nobody takes custody of anyone's funds** — that's the whole reason this install exists separately from the hosted one.
+
+Then tell your agent:
+
+> set up somnus for me
+
+`somnus_setup` mints a fresh wallet, writes the key to `backend/.env` (never into the conversation — an MCP result is chat content and gets stored), and reports the address. One step it *can't* do for you: the SDK's faucet mints **collateral only**, and minting is itself a transaction that needs gas. So send a little of the native token to the address it prints, then run setup again and it draws its own tUSDC.
+
+It comes up in dry-run. Nothing reaches the chain until you say so.
+
+### The tool surface
+
+| | Read (hosted + local) | Write (local only) |
+|---|---|---|
+| **State** | `health` `config` `explain` | `config_set` `pause` `resume` |
+| **Market** | `markets` `book` `horizons` | `scan` `confirm` |
+| **Money** | `pnl` `report` | `settle` `claim` `setup` |
+| **Trust** | `proof_verify` `pnl_verify` `reconcile` `decisions` | `loop_start` `loop_stop` `loop_status` |
+
+Write tools go through the same broker and the same circuit breakers as the HTTP API — MCP is another doorway onto the same enforcement, not a way past it.
+
+---
+
 ## Safety model (the short version)
 
 - **`DRY_RUN=true` is the floor** — env can force it globally. Live needs *both* `DRY_RUN=false` **and** saved config `mode: "live"` **and** a `TRADE_KEY` (or `PRIVATE_KEY`).
@@ -96,6 +146,7 @@ Set `SOMNUS_API_KEY` to require `X-API-Key` on mutating routes.
 - **One process per data dir.** A lockfile enforces it; two processes would corrupt the audit chain and double-spend the position budget.
 - **It tells you when it stops.** Set `ALERT_WEBHOOK_URL` and a breaker trip, loop halt, feed blackout or unrecorded position reaches you instead of a log file.
 - **Dedicated testnet key only** — put only what you're willing to lose.
+- **The hosted MCP endpoint cannot trade.** It registers only read tools, so publishing the URL hands out no authority. Trading lives in the local install, where the person running the process owns the wallet.
 - **Loop is off by default** — `POST /api/agent/loop/start` or `AGENT_AUTOSTART=true` to arm it.
 
 ---

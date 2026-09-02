@@ -17,14 +17,17 @@
     "calibration": "tsx scripts/calibration.ts",
     "luck": "tsx scripts/luck-or-bias.ts",
     "score": "tsx scripts/score.ts",
-    "survey": "tsx scripts/market-survey.ts"
+    "survey": "tsx scripts/market-survey.ts",
+    "mcp": "tsx src/mcp-server.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@somnia-chain/markets-sdk": "^0.28.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "viem": "^2.21.0"
+    "viem": "^2.21.0",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
