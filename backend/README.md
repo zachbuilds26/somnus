@@ -1,7 +1,7 @@
 # Somnus Backend
 
 Governed, auditable AI trading agent runtime for **DreamDEX Event Contracts on Somnia**.
-Backend-first: the REST API *is* the product shell; the frontend is a window into it.
+Backend-only: the REST API and autonomous runtime are the product.
 
 ## Run (dev)
 
@@ -42,28 +42,37 @@ Base `http://localhost:4545/api`
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | liveness + network + DRY_RUN state + loop status + proof anchor |
+| GET | `/health` | liveness, network, DRY_RUN state, per-feed health, wallet, clock skew, breaker state, loop, proof anchor |
+| GET | `/metrics` | Prometheus text format (not under `/api` — scrapers expect it at the root) |
 | GET | `/markets` | spot markets from the DreamDEX REST indexer (live) |
 | GET | `/markets/binary` | live Event Contract (Up/Down) windows via SDK — **no key needed** |
 | GET | `/markets/:symbol/book` | top-of-book + mid for a YES symbol |
 | GET/PUT | `/agent/config` | read / update governing rules |
 | POST | `/agent/run` | one decision cycle (dry-run by default) |
-| GET | `/agent/logs` | recent decisions + orders |
+| GET | `/agent/logs` | recent decisions + orders; `?kind=&since=&until=&cursor=&limit=` |
+| GET | `/agent/stream` | SSE: decisions, orders, cycles, settlements, breaker trips |
 | GET | `/agent/loop` | autonomous loop status (cycles, errors, interval) |
 | POST | `/agent/loop/start` | start running cycles on `intervalMs` |
 | POST | `/agent/loop/stop` | stop the loop |
+| POST | `/agent/pause` | kill switch on; halts the loop. `{reason}` optional |
+| POST | `/agent/resume` | kill switch off. `{clearFailures:true}` also resets the venue counter |
+| GET | `/agent/reconcile` | on-chain positions vs ledger rows — finds lost writes |
+| GET | `/agent/pnl` | ledger summary, including gas spent (native, reported separately) |
+| GET | `/agent/pnl/verify` | ledger rows vs signed order entries in the proof chain |
+| POST | `/agent/settle-sweep` | realise settled outcomes without redeeming |
 | GET | `/agent/claimable` | settled positions that can be redeemed |
 | POST | `/agent/claim` | redeem them (honours DRY_RUN + `claimEnabled`) |
-| GET | `/proof` | latest proof-chain entries |
+| GET | `/proof` | proof-chain entries; same filters as `/agent/logs` |
 | POST | `/proof/verify` | re-hash a range and verify linkage |
 
-Optional gateway auth: set `SOMNUS_API_KEY` and send `X-API-Key`.
+Optional gateway auth: set `SOMNUS_API_KEY` and send `X-API-Key`. It applies to
+mutating routes only, so `/metrics` and `/agent/stream` stay scrapeable.
 
 ## CLI
 
 ```bash
 npm run typecheck     # tsc --noEmit
-npm test              # 51 unit + regression tests, no network, no keys
+npm test              # 130 unit + regression tests, no network, no keys
 npm run doctor        # read-only connectivity probe (no keys needed)
 npm run faucet        # mint test tUSDC to the trade key (testnet only)
 npm run faucet -- 2500
@@ -83,12 +92,15 @@ happened**, not toward a coverage percentage:
 |---|---|
 | `store.test.ts` | 25 concurrent appends must not break linkage — the bug that corrupted a real 341-entry chain. Also: tampering, reordering and dropped entries must all fail, and key order must not matter. |
 | `pricing.test.ts` | sizing and the notional gate must agree on the cost basis; a Down leg costs `(1 - bid)`. Getting this wrong rejected 100% of Down orders. |
+| `broker.test.ts` | a partial IOC fill must be billed for what FILLED, not for what was requested — the bug that booked a $489 winner as a $10 loser. Plus: `maxOpenNotional` sizes a trade down rather than discarding it, and reaches zero instead of going negative. |
+| `runtime.test.ts` | drawdown releases on recovery instead of banning the agent forever; gas is counted but never mixed into tUSDC; a swept settlement is real P&L and stays idempotent when a later claim re-records it; alerts dedupe per incident; a throwing SSE subscriber cannot break a trade; cursor paging never repeats an audit row. |
 | `signal.test.ts` | horizon volatility must not be the `sqrt(t)` multiple on a mean-reverting series; strike scaling must reject an implausible level rather than trade a 100x-wrong one. |
 | `agent-config.test.ts` | no hostile PUT can widen the risk envelope — and no casing trick (`"LIVE"`) can arm live mode. |
 
 Tests run against a temp `DATA_DIR` (set by `test/env.ts` via `tsx --import`) with
 `DRY_RUN` forced on, so a test run can neither append to the real audit chain nor
-send an order.
+send an order. `npm run typecheck` covers `src` and `test`; `scripts/` is not
+typechecked.
 
 ## Durability of the audit chain
 
@@ -126,6 +138,19 @@ send an order.
   log. A log-based count never decreases, so the agent would stop trading forever
   once it crossed the limit.
 - **Tightening a limit mid-cycle sizes the trade down**, it doesn't discard it.
+- **An IOC can fill PARTIALLY, and the cost basis has to follow the fill.** The
+  SDK reports `status: 'canceled'` with a `filled` quantity below what was
+  requested; it also floors the quantity onto the lot grid and snaps the price
+  onto the tick grid before placing. Billing the requested size booked a real
+  $489 winner as a $10 loser (1976 requested, 990 filled), which then corrupted
+  win rate, realised P&L, the daily-loss breaker and `npm run score`. An order
+  that filled nothing gets no ledger row at all — writing one invents a loss the
+  wallet never took.
+- **Nothing about a per-trade cap bounds a BATCH.** `maxDailyLoss` reads realised
+  P&L, and a binary realises nothing until its window settles, so orders placed
+  inside one interval are invisible to it. `maxOpenNotional` caps the collateral
+  riding at once, enforced both against the ledger's open cost at cycle start and
+  against what the cycle has already committed.
 
 ## Concurrency guarantees
 
@@ -141,6 +166,42 @@ Three invariants are enforced rather than left to luck:
   the in-flight cycle.
 - **One claim at a time.** Two concurrent claims would each redeem the same
   positions, the second burning gas to revert.
+
+All three are module state, which means all three hold within one process and none
+of them hold across two. So:
+
+- **One process per data dir.** A lockfile in `data/somnus.lock` records the pid and
+  is checked at boot; a second `npm start` refuses to run rather than interleaving
+  appends into the same chain. A stale lock (pid no longer alive) is taken over with
+  a warning suggesting `/api/agent/reconcile`, because refusing to ever start again
+  after a SIGKILL would be worse than the problem.
+- **Shutdown waits for the cycle.** `SIGTERM` stops the loop and then waits up to
+  `SHUTDOWN_GRACE_MS` for an in-flight cycle, instead of `process.exit(0)` wherever
+  execution happened to be. Exiting between a fill landing on-chain and its ledger
+  write leaves a position nothing local knows about.
+
+## Knowing when it goes wrong
+
+- **Alerts.** `ALERT_WEBHOOK_URL` receives a JSON POST on a breaker trip, a loop
+  halt, a total feed blackout, a failed settlement sweep, blocking clock skew, and
+  on-chain positions missing from the ledger. Deduped per incident (15 min default)
+  because a re-evaluated breaker would otherwise send a message a minute until
+  somebody mutes the channel. Unset is legal and logged loudly at boot in live mode.
+- **`/metrics`.** Prometheus text format. `/health` answers "is it up"; this is what
+  lets you see the win rate falling for six hours *before* the halt.
+- **`/agent/reconcile`.** Diffs on-chain positions against ledger rows. On-chain-only
+  means a lost write — real risk the limits cannot see. Ledger-only means cost basis
+  pinned against the exposure budget for a position that no longer exists. It reports
+  and never auto-repairs: writing invented rows into an append-only financial record
+  to make two numbers agree turns a detectable problem into an undetectable one.
+- **`/agent/pnl/verify`.** The proof chain is hash-linked, signed and anchored;
+  `pnl-ledger.jsonl` — which every risk limit reads — was plain JSONL with no
+  integrity guarantee. This rebuilds what the ledger should contain from the signed
+  order entries and reports the difference.
+- **Clock skew.** Measured against the latest block timestamp at boot and every five
+  minutes. Every expiry decision is arithmetic on the host clock against on-chain
+  seconds; drift makes the agent trade locked windows or mis-price live ones, and
+  the 75-second expiry headroom hides small drift until it is large.
 
 ## Verifying the audit trail
 
@@ -233,12 +294,22 @@ is, which is a different question from where the model is accurate.
 1. **DRY_RUN=true everywhere** until you explicitly set `AGENT_MODE=live` + a key.
    `DRY_RUN` is a floor, not a preference: env can force it on globally, and the
    saved agent mode must *also* be `live` before anything is sent.
-2. Every order still passes server-side limit gates: notional ≤ `maxTradeSize`,
-   open positions ≤ `maxOpenPositions`, price within (0,1), edge ≥ `minEdge`.
+2. Every order still passes server-side limit gates: notional ≤ `maxTradeSize` (and
+   ≤ `maxTradeSizePctEquity` of equity when enabled), open positions ≤
+   `maxOpenPositions`, open collateral ≤ `maxOpenNotional`, positions on one expiry ≤
+   `maxPerExpiryBucket`, price within (0,1), edge ≥ `minEdge`, and the wallet must
+   actually hold the collateral and the gas.
    These read the **saved rules** (`backend/data/agent-config.json`, written by
    `PUT /agent/config`) — the same document Agent Studio edits — so a limit you
    set in the UI is genuinely enforced rather than merely displayed. Notional for
    a Down leg is `(1 - bid) x size`, the actual cash at risk, not the wire price.
+
+   Session-level breakers sit above them: `maxDailyLoss` (UTC day), `maxDrawdown`
+   (peak-to-trough, off by default), `maxConsecutiveLosses`, `maxExecutionFailures`,
+   `maxDataAgeMs`, `maxSettlementAgeMs`, clock skew, and the `tradingPaused` kill
+   switch. A tripped breaker halts the loop, persists, alerts, and requires an
+   explicit `POST /agent/resume` — an agent that un-pauses itself after a loss streak
+   has no brake at all.
 3. **Proof chain** — every decision/order/config is hashed into a tamper-evident
    chain (`prevHash + payloadHash + kind` → sha256), optionally signed
    (`privateKeyToAccount` over secp256k1), and **persisted** to
@@ -252,8 +323,8 @@ is, which is a different question from where the model is accurate.
 src/
   config.ts        env + safe defaults (network, endpoints, agent seeds)
   agent-config.ts  the saved governing rules — single source of truth for limits
-  server.ts        express bootstrap + gateway key check
-  routes/          health, markets, agent, proof
+  server.ts        express bootstrap, boot preflight, gateway key check
+  routes/          health, markets, agent, proof, metrics
   services/
     markets.ts     REST spot-market normalizer
     sdk.ts         SDK gateway: keyless reads (event markets + books), retry + cache
@@ -263,10 +334,18 @@ src/
     pricing.ts     fair-vs-book decision math (BUY_YES / BUY_NO / PASS)
     agent.ts       one decision cycle: books → signal → decisions → orders
     broker.ts      the hard gate: limits, DRY_RUN, order routing, optional submit
+    wallet.ts      collateral + gas + equity, and what one order costs in gas
+    risk.ts        circuit breakers, kill switch, sweep freshness
     loop.ts        the autonomous loop (non-overlapping cycles on intervalMs)
-    settlement.ts  claim sweep: find settled winners and redeem them
+    settlement.ts  settlement sweep (realises P&L) + claim sweep (moves collateral)
+    reconcile.ts   on-chain positions vs the local ledger
+    clock.ts       host-vs-chain clock skew
+    lock.ts        one process per data dir
+    alerts.ts      outbound webhook on anything that stops the agent
+    events.ts      in-process bus behind the SSE stream
     proof.ts       secp256k1 signer over the proof hash
-    store.ts       hash-chained audit log + JSONL persistence
+    store.ts       hash-chained audit log + JSONL persistence + paging
+    pnl.ts         fill/settlement ledger, gas, drawdown, ledger verification
 ```
 
 ## Autonomous operation

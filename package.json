@@ -4,11 +4,13 @@
   "private": true,
   "description": "Governed, auditable AI trading agent for DreamDEX Event Contracts on Somnia",
   "workspaces": [
-    "backend",
-    "web"
+    "backend"
   ],
   "scripts": {
-    "dev:be": "npm run dev -w backend",
-    "typecheck:be": "npm run typecheck -w backend"
+    "dev": "npm run dev -w backend",
+    "start": "npm run start -w backend",
+    "typecheck": "npm run typecheck -w backend",
+    "test": "npm run test -w backend",
+    "doctor": "npm run doctor -w backend"
   }
 }

@@ -51,6 +51,14 @@ Latest measured state lives in `GET /api/agent/horizons` and `npm run doctor`.
 | Cheap YES tails (<$0.35 asks) underperformed — 0/4 live vs ~1.2 expected; crash-risk priced above lognormal fools a GBM model | 2026-08-25 | Tail surcharge: YES legs below `AGENT_TAIL_YES_FLOOR` (0.35) demand `AGENT_TAIL_EDGE_MULT` (1.5×) edge. Recorded in each decision's `pricedNote`. |
 | sqrt(t) vol scaling overstated long-horizon dispersion ~4x on this mean-reverting feed | earlier | Horizon-matched k-step estimators, max(direct, scaled); estimator label stored per decision |
 | Absolute-strike windows misread when upstream rescales units | earlier | Scale detection vs spot with 5x implausibility refusal |
+| Partial IOC fills were billed at the REQUESTED size, so the ledger was wrong on exactly the trades that mattered most. 4 of 102 submitted orders came back `canceled` (partial) — all four were the ~$1000 orders. One winner (1976 requested, 990 filled) was booked as a $10 loser instead of a ~$489 win. | 2026-08-30 | `resolveFill` takes the cost basis from the venue's reported `filled` and tick-snapped price; an order that filled nothing gets no ledger row. Pinned by `broker.test.ts`. |
+| Four ~$1000 orders went out between 18:41 and 18:46 and all settled together at 19:17, so the $1000 `maxDailyLoss` breaker had nothing to read until every one had resolved — $4000 at risk under a $1000 limit. `maxOpenPositions` counts positions, not dollars. | 2026-08-30 | `maxOpenNotional` caps collateral riding at once (defaults to `maxDailyLoss`), enforced against the ledger's open cost plus what the cycle has already committed. Sizes down rather than refusing. |
+
+**Re-measure the ledger before trusting any historical P&L.** Rows written before
+the partial-fill fix overstate cost on the four `canceled` orders. `npm run score`
+reads the proof chain, where the order entries now carry `filledSize` and
+`fillStatus`, so new records are gradeable directly; older ones are not
+reconstructible and should be split out rather than pooled.
 
 ## Research findings (2026-08-25/26 deep pass)
 

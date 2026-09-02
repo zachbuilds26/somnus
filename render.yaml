@@ -11,6 +11,12 @@ services:
         value: testnet
       - key: PORT
         value: 10000
+      # server.ts binds 127.0.0.1 by default — correct for a laptop holding a key,
+      # fatal here: a loopback-bound service fails its own health check and is
+      # unreachable from outside the container. SOMNUS_API_KEY below is what makes
+      # exposing it safe, and it is generated rather than optional for that reason.
+      - key: HOST
+        value: 0.0.0.0
       - key: NODE_VERSION
         value: 20.19.0
       - key: DRY_RUN
@@ -21,20 +27,12 @@ services:
         value: 50
       - key: AGENT_MAX_DAILY_LOSS
         value: 1000
+      - key: SOMNUS_API_KEY
+        generateValue: true
+      # A hosted agent nobody is watching needs somewhere to shout. Any endpoint
+      # that accepts a JSON POST works; left unset, breakers still trip but silently.
+      - key: ALERT_WEBHOOK_URL
+        sync: false
       - key: ALLOWED_ORIGINS
-        value: https://somnus-web.onrender.com,http://localhost:5173
+        value: http://localhost:5173
     autoDeploy: true
-
-  - type: web
-    name: somnus-web
-    runtime: static
-    rootDir: web
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_URL
-        value: https://somnus-backend.onrender.com
