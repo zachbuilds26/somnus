@@ -1,5 +1,10 @@
 import { config } from '../config';
+import { fetchWithTimeout } from '../http';
 import type { NormalizedMarket } from '../types';
+
+/** The REST indexer is a third party and /health probes it on a 10s cache, so an
+ *  unbounded read here would turn their outage into our hung liveness check. */
+const REST_TIMEOUT_MS = Number(process.env.REST_TIMEOUT_MS ?? 10_000);
 
 interface RawSpotMarket {
   base: string;
@@ -19,9 +24,7 @@ interface RawSpotMarket {
  *  windows come from the SDK (`sdk.ts`) instead.                              */
 export async function fetchSpotMarkets(): Promise<NormalizedMarket[]> {
   const url = `${config.restUrl}/markets`;
-  const res = await fetch(url, {
-    headers: { accept: 'application/json' },
-  });
+  const res = await fetchWithTimeout(url, { headers: { accept: 'application/json' } }, REST_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`indexer ${res.status} ${res.statusText}`);
   }

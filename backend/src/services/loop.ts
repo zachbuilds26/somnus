@@ -1,8 +1,16 @@
 import { log, warn } from '../config';
 import { effectiveDryRun, loadAgentConfig } from '../agent-config';
-import { runCycle } from './agent';
+import { isCycleInFlight, runCycle } from './agent';
 import { riskStatus } from './risk';
-import { tickFeedHealth } from './sdk';
+import { feedHealthReport, tickFeedHealth } from './sdk';
+import { sweepSettlements } from './settlement';
+import { checkClockSkew } from './clock';
+import { raiseAlert } from './alerts';
+import { publish } from './events';
+
+/** How often to reconcile chain state against the ledger. Every cycle would be a
+ *  portfolio read per minute for a check that only catches crash-shaped bugs. */
+const RECONCILE_EVERY_CYCLES = Number(process.env.AGENT_RECONCILE_EVERY_CYCLES ?? 30);
 
 /** The autonomous loop — the thing that makes "awake while you sleep" true.
  *
@@ -75,6 +83,20 @@ async function tick(gen: number): Promise<void> {
   if (!running || busy || gen !== generation) return; // never overlap
   busy = true;
   try {
+    // Realise settled outcomes BEFORE reading the breakers. The loss limits are
+    // computed from the P&L ledger, and only a sweep writes settled positions into
+    // it — checking the breakers first would grade the session on everything except
+    // what just happened. This is also what keeps those limits honest when claiming
+    // is broken or switched off: settlement determines P&L, redemption only moves
+    // the collateral.
+    const sweep = await sweepSettlements();
+    if (sweep.realized > 0) {
+      publish('settlement', { realized: sweep.realized, winners: sweep.winners, losers: sweep.losers, pnl: sweep.pnl });
+    }
+    // Expiry arithmetic is only as good as the clock behind it, and a drifting host
+    // clock makes every "seconds left" decision wrong without ever erroring.
+    await checkClockSkew();
+
     // A tripped circuit breaker should stop the loop, not be rediscovered by
     // every cycle. Without this the agent keeps waking up, reads a dozen books
     // and logs a rejection per market — burning indexer calls to learn something
@@ -84,12 +106,32 @@ async function tick(gen: number): Promise<void> {
       lastError = risk.blocked.join('; ');
       lastSummary = `halted by risk controls: ${lastError}`;
       warn(`loop halted — ${lastError}`);
+      publish('risk', { halted: true, blocked: risk.blocked });
+      raiseAlert({
+        level: 'critical',
+        key: 'loop-halted',
+        title: `agent loop HALTED — ${lastError}`,
+        detail: { blocked: risk.blocked, cycles, lastRunAt },
+      });
       stopLoop();
       return;
     }
     // Heal a silently-dead price-feed socket before the cycle runs, so a blind
     // agent rebuilds its own feed instead of quietly trading on stale/empty spot.
     tickFeedHealth();
+
+    // A blind agent is worse than a stopped one. The freshness gate will refuse
+    // every execution anyway, so say why instead of logging silent inaction.
+    const feeds = feedHealthReport();
+    if (feeds.sources.length > 0 && feeds.sources.every((s) => !s.ok)) {
+      raiseAlert({
+        level: 'critical',
+        key: 'feeds-all-down',
+        title: 'every market-data feed is failing — the agent is trading blind',
+        detail: { sources: feeds.sources.map((s) => ({ source: s.source, error: s.error })) },
+      });
+    }
+
     const out = await withTimeout(runCycle(), CYCLE_TIMEOUT_MS);
     cycles++;
     lastRunAt = Date.now();
@@ -97,9 +139,25 @@ async function tick(gen: number): Promise<void> {
       `${out.decisions.length} decisions, ${out.orders.length} orders, ${out.errors.length} errors`;
     if (out.errors.length > 0) lastError = out.errors[0];
     log(`loop cycle ${cycles}: ${lastSummary}`);
+    publish('cycle', {
+      cycle: cycles,
+      decisions: out.decisions.length,
+      orders: out.orders.length,
+      errors: out.errors,
+    });
+
+    // Periodic reconciliation: a fill whose ledger write was lost is invisible to
+    // every limit, and the only way to find it is to ask the chain what we hold.
+    if (cycles % RECONCILE_EVERY_CYCLES === 0) {
+      const { reconcile } = await import('./reconcile');
+      const report = await reconcile();
+      if (!report.ok) warn(`reconcile: ${report.summary}`);
+    }
 
     // Auto-claim: if any 5m/15m winners just settled, redeem them right away
-    // so pnl winRate updates by itself — no manual /claim click needed.
+    // so the collateral comes back. P&L no longer depends on this succeeding —
+    // the sweep above already recorded the outcome — so a claim failure costs
+    // custody, not correctness.
     void (async () => {
       try {
         const rules2 = loadAgentConfig();
@@ -180,6 +238,30 @@ export function stopLoop(): LoopStatus {
   }
   log('agent loop stopped');
   return loopStatus();
+}
+
+/** Wait for an in-flight cycle to finish.
+ *
+ *  Shutdown used to be `stopLoop(); process.exit(0)`, which cancels the next tick and
+ *  then kills the process wherever the current one happens to be. If that was
+ *  between a live order landing on-chain and its ledger write, the position exists
+ *  and nothing local knows about it — the exact drift `reconcile()` was written to
+ *  detect. Better to spend a few seconds waiting than to create work for the
+ *  reconciler on every deploy.
+ *
+ *  Bounded: a wedged cycle must not turn a restart into a hang. `CYCLE_TIMEOUT_MS`
+ *  already caps a cycle, and this caps the wait. */
+export async function waitForIdle(timeoutMs = 30_000): Promise<boolean> {
+  // BOTH guards, not just the loop's. A manual POST /agent/run runs under agent.ts's
+  // own in-flight guard and never sets `busy`, so watching only `busy` meant shutdown
+  // walked straight through a manual cycle — the one case this was written for.
+  const inFlight = (): boolean => busy || isCycleInFlight();
+  const deadline = Date.now() + timeoutMs;
+  while (inFlight() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (inFlight()) warn(`shutdown: cycle still in flight after ${timeoutMs}ms — exiting anyway`);
+  return !inFlight();
 }
 
 /** Opt-in autostart. Defaults OFF: a process that starts trading the moment it

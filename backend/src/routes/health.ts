@@ -5,6 +5,10 @@ import { fetchSpotMarkets } from '../services/markets';
 import { loopStatus } from '../services/loop';
 import { feedHealthReport, feedStaleMs } from '../services/sdk';
 import { riskStatus } from '../services/risk';
+import { clockState } from '../services/clock';
+import { walletSnapshot } from '../services/wallet';
+import { alertsConfigured, recentAlerts } from '../services/alerts';
+import { lockInfo } from '../services/lock';
 import { currentAnchor, count } from '../services/store';
 
 export const healthRouter: Router = Router();
@@ -34,6 +38,10 @@ healthRouter.get('/health', async (_req, res) => {
   const rules = loadAgentConfig();
   const stale = feedStaleMs();
   const risk = riskStatus(rules);
+  const clock = clockState();
+  // Cached (10s TTL), so the most-polled endpoint on the service does not turn every
+  // page refresh into a pair of RPC calls.
+  const wallet = await walletSnapshot();
   res.json({
     ok: true,
     name: 'somnus-backend',
@@ -56,7 +64,56 @@ healthRouter.get('/health', async (_req, res) => {
       lossToday: risk.lossToday,
       consecutiveLosses: risk.consecutiveLosses,
       executionFailures: risk.executionFailures,
+      // Collateral committed right now, against the ceiling. A daily loss limit
+      // cannot see this: binaries only realise at settlement, so a batch placed
+      // inside one interval is invisible to it until every window has resolved.
+      openNotional: risk.openNotional,
+      maxOpenNotional: risk.limits.maxOpenNotional,
+      drawdown: risk.drawdown,
+      maxDrawdown: risk.limits.maxDrawdown,
+      // How old the loss data behind those breakers is. Every limit above reads the
+      // P&L ledger, and only a settlement sweep writes settled outcomes into it — so
+      // a stale sweep means these numbers stopped moving, which is not the same as
+      // a flat day.
+      settlementAgeSec:
+        risk.settlementAgeMs === undefined ? undefined : Math.round(risk.settlementAgeMs / 1000),
+      lastSweepError: risk.lastSweepError,
+      // Age of the last order book we could actually read. Everything the agent
+      // decides is derived from the book, so this being stale means blind, not
+      // degraded — and it blocks trading rather than only colouring a dashboard.
+      bookAgeSec: risk.bookAgeMs === undefined ? undefined : Math.round(risk.bookAgeMs / 1000),
     },
+    // Expiry arithmetic is only as good as the clock behind it.
+    clock: {
+      skewSec: clock.skewSec,
+      ok: clock.ok,
+      blocking: clock.blocking,
+      checkedAt: clock.checkedAt,
+      error: clock.error,
+    },
+    wallet: {
+      collateral: wallet.collateral,
+      collateralCode: wallet.collateralCode,
+      native: wallet.native,
+      nativeCode: wallet.nativeCode,
+      readAt: wallet.ts,
+      error: wallet.error,
+    },
+    alerts: {
+      // An unattended agent with no alerting is one you find out about in the
+      // morning, so make the absence visible rather than implied.
+      configured: alertsConfigured(),
+      // Level, title and time only. The `detail` payloads carry pause reasons and
+      // loss figures, and /health is deliberately unauthenticated so dashboards and
+      // load balancers can poll it — that is the wrong place to publish them.
+      recent: recentAlerts(5).map((a) => ({
+        level: a.level,
+        title: a.title,
+        ts: a.ts,
+        delivered: a.delivered,
+      })),
+    },
+    instance: lockInfo(),
     loop: loopStatus(),
     proofAnchor: currentAnchor(),
     proofEntries: count(),

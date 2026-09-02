@@ -1,20 +1,19 @@
 import express from 'express';
 import cors from 'cors';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-import { config, warn } from './config';
+import { config, log, warn } from './config';
 import { setSigner } from './services/store';
 import { createConfiguredSigner } from './services/proof';
 import { healthRouter } from './routes/health';
 import { marketsRouter } from './routes/markets';
 import { agentRouter } from './routes/agent';
 import { proofRouter } from './routes/proof';
-import { authRouter } from './routes/auth';
-import { userRouter } from './routes/user';
-import { rateLimit } from './middleware/ratelimit';
-import { stopAllAgents } from './services/user-agent';
-import { maybeAutostart } from './services/loop';
+import { metricsRouter } from './routes/metrics';
+import { maybeAutostart, stopLoop, waitForIdle } from './services/loop';
 import { maybeAnchor } from './services/anchor';
+import { acquireLock, LockHeldError, releaseLock } from './services/lock';
+import { checkClockSkew } from './services/clock';
+import { logWalletState } from './services/wallet';
+import { alertsConfigured } from './services/alerts';
 
 
 const app = express();
@@ -61,18 +60,9 @@ app.use('/api', healthRouter);
 app.use('/api', marketsRouter);
 app.use('/api', agentRouter);
 app.use('/api', proofRouter);
-// Hardening: blunt auth brute-force before the auth routes handle it.
-app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 12, key: (r) => r.ip ?? 'anon', message: 'too many auth attempts — wait a minute' }));
-app.use('/api', authRouter);
-app.use('/api', userRouter);
-
-// Embeddable visitor widget (Connect Wallet → fund a session → trade). Served as
-// static files plus clean URLs so it can be iframed into any site.
-const publicDir = fileURLToPath(new URL('../public', import.meta.url));
-const widgetFile = fileURLToPath(new URL('../public/widget.html', import.meta.url));
-app.use(express.static(publicDir));
-app.get('/widget', (_req, res) => res.sendFile(widgetFile));
-app.get('/embed', (_req, res) => res.sendFile(widgetFile));
+// Prometheus scrape endpoint. Deliberately NOT under /api: scrapers expect /metrics
+// at the root, and it is a read-only text rendering of state /health already exposes.
+app.use(metricsRouter);
 
 
 
@@ -107,54 +97,85 @@ function installProcessGuards(): void {
   process.on('uncaughtException', (err) => {
     warn('UNCAUGHT EXCEPTION —', err?.message ?? String(err));
     try {
-      stopAllAgents();
+      stopLoop();
     } catch {
       /* nothing to stop */
     }
   });
-  const shutdown = () => {
-    warn('shutting down...');
-    stopAllAgents();
-    process.exit(0);
+
+  // Shutdown has to be ORDERLY, not immediate. `stopLoop(); process.exit(0)` cancels
+  // the next tick and then kills the process wherever the current cycle happens to
+  // be — and if that is between a live order landing on-chain and its ledger write,
+  // the position exists and nothing local knows about it. A few seconds of waiting
+  // is cheaper than a reconciliation diff on every deploy.
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    warn(`${signal} received — stopping the loop and finishing any in-flight cycle...`);
+    stopLoop();
+    void waitForIdle(SHUTDOWN_GRACE_MS).then((clean) => {
+      releaseLock();
+      warn(clean ? 'shutdown clean' : 'shutdown forced with a cycle still in flight — run /api/agent/reconcile');
+      process.exit(0);
+    });
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  // A normal exit still has to give the lock back, or the next start reports a
+  // phantom holder and refuses to run.
+  process.on('exit', () => releaseLock());
+}
+
+const SHUTDOWN_GRACE_MS = Number(process.env.SHUTDOWN_GRACE_MS ?? 30_000);
+
+/** Refuse to boot into a state that is unsafe rather than merely unusual, and report
+ *  the things an operator would otherwise discover from a failed trade. */
+async function preflight(): Promise<void> {
+  // Only ONE process may own a data dir. All three concurrency invariants this
+  // codebase documents — one append, one cycle, one claim — are module state, so
+  // they hold within a process and not across two. Two processes interleaving
+  // appends is the corruption that produced the backup files still in data/.
+  try {
+    acquireLock();
+  } catch (err) {
+    if (err instanceof LockHeldError) {
+      console.error(`\n[somnus] REFUSING TO START\n${err.message}\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  // Clock first: every expiry decision is arithmetic on the host clock against
+  // on-chain seconds, and drift makes all of it wrong without erroring once.
+  const clock = await checkClockSkew(true);
+  if (clock.skewSec !== undefined) {
+    const line = `clock skew ${clock.skewSec}s vs chain`;
+    if (clock.blocking) warn(`${line} — ABOVE the safe bound; trading is blocked until it is fixed`);
+    else if (!clock.ok) warn(line);
+    else log(line);
+  } else if (clock.error) {
+    warn(`could not measure clock skew: ${clock.error}`);
+  }
+
+  // What the wallet can actually afford. Cheap, and it turns "every order reverts"
+  // into a line at startup.
+  if (!config.dryRun) await logWalletState();
 }
 
 export function start(): void {
   installProcessGuards();
   setSigner(createConfiguredSigner());
-  // Optionally resume the autonomous loop on boot (AGENT_AUTOSTART=true). Off by
-  // default so a process that boots trading the moment it starts is never the
-  // default for something holding a key.
-  maybeAutostart();
+  void preflight().then(() => {
+    // Optionally resume the autonomous loop on boot (AGENT_AUTOSTART=true). Off by
+    // default so a process that boots trading the moment it starts is never the
+    // default for something holding a key. After preflight, so a locked data dir or
+    // a broken clock is known before any order can be placed.
+    maybeAutostart();
+  });
   // Periodically anchor the proof-chain head on-chain so the audit trail is
   // tamper-evident externally, not just on this machine.
   setInterval(() => void maybeAnchor(), 60_000).unref?.();
-  // Auto-notify + autoclaim: after any trade, Telegram DM win/loss + profit and claim winners
-  let lastLoserIds = new Set<string>();
-  let lastClaimedIds = new Set<string>();
-  setInterval(async () => {
-    try {
-      const { findClaimable, claimAll } = await import('./services/settlement.js');
-      const scan = await findClaimable();
-      if (scan.claimable.length > 0) {
-        const ids = scan.claimable.map((c) => `${c.marketId}:${c.outcomeIdx}`).sort().join(',');
-        const lastIds = [...lastClaimedIds].sort().join(',');
-        if (ids !== lastIds) {
-          const res = await claimAll();
-          lastClaimedIds = new Set(scan.claimable.map((c) => `${c.marketId}:${c.outcomeIdx}`));
-          if (res.claimed.length > 0) {
-            const total = Number(res.totalEstPayout) / 1e6;
-            console.error(`[somnus] auto-claimed +$${total.toFixed(2)} tx ${res.txHash ?? ''}`);
-          }
-        }
-      }
-      const loserKey = (m: { marketId: string; outcomeIdx: number }) => `${m.marketId}:${m.outcomeIdx}`;
-      const newLosers = scan.settledLosers.filter((m) => !lastLoserIds.has(loserKey(m)));
-      if (newLosers.length > 0) for (const l of newLosers) lastLoserIds.add(loserKey(l));
-    } catch {}
-  }, 30_000).unref?.();
   // Bind to loopback by default. An API that can arm live trading must not be
   // reachable from the network just because someone ran it on a shared host.
   // Override with HOST=0.0.0.0 (and set SOMNUS_API_KEY) only when intentional.
@@ -163,6 +184,7 @@ export function start(): void {
     console.log(`[somnus] listening on http://${host}:${config.port}`);
     console.log(`[somnus] network=${config.network} chainId=${config.chainId} dryRun=${config.dryRun} mode=${config.agent.mode}`);
     console.log(`[somnus] cors origins: ${allowedOrigins.join(', ')}`);
+    console.log(`[somnus] alerts: ${alertsConfigured() ? 'webhook configured' : 'NOT configured (set ALERT_WEBHOOK_URL)'}`);
 
     // An unauthenticated API that can arm live trading is a wallet-drain risk the
     // moment it leaves localhost. Say so loudly rather than in a doc nobody reads.
@@ -170,6 +192,13 @@ export function start(): void {
       warn(
         'LIVE mode with NO SOMNUS_API_KEY — anyone who can reach this port can ' +
           'change your limits and place orders. Set SOMNUS_API_KEY before exposing it.',
+      );
+    }
+    // An unattended agent with no alerting is one you find out about in the morning.
+    if (!config.dryRun && !alertsConfigured()) {
+      warn(
+        'LIVE mode with no ALERT_WEBHOOK_URL — if a breaker trips overnight nothing ' +
+          'will tell you. Set it to any endpoint that accepts a JSON POST.',
       );
     }
   });

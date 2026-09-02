@@ -16,6 +16,12 @@ const base = (): AgentConfigDoc => ({
   maxPerMarket: 1,
   tradeQuota: null,
   maxDailyLoss: 10,
+  maxOpenNotional: 20,
+  maxDrawdown: 0,
+  maxTradeSizePctEquity: 0,
+  maxPerExpiryBucket: 2,
+  maxSameDirection: 0,
+  maxSettlementAgeMs: 1_800_000,
   maxConsecutiveLosses: 3,
   maxExecutionFailures: 3,
   maxDataAgeMs: 15_000,
@@ -62,7 +68,7 @@ describe('agent-config.sanitize', () => {
     const clean = sanitize(dirty) as unknown as Record<string, unknown>;
     assert.deepEqual(
       Object.keys(clean).sort(),
-      ['claimEnabled', 'edgePreset', 'intervalMs', 'maxConsecutiveLosses', 'maxDailyLoss', 'maxDataAgeMs', 'maxExecutionFailures', 'maxOpenPositions', 'maxOrdersPerCycle', 'maxPerMarket', 'maxTradeSize', 'minEdge', 'mode', 'symbols', 'tradeQuota', 'tradingPaused'],
+      ['claimEnabled', 'edgePreset', 'intervalMs', 'maxConsecutiveLosses', 'maxDailyLoss', 'maxDataAgeMs', 'maxDrawdown', 'maxExecutionFailures', 'maxOpenNotional', 'maxOpenPositions', 'maxOrdersPerCycle', 'maxPerExpiryBucket', 'maxPerMarket', 'maxSameDirection', 'maxSettlementAgeMs', 'maxTradeSize', 'maxTradeSizePctEquity', 'minEdge', 'mode', 'symbols', 'tradeQuota', 'tradingPaused'],
     );
   });
 
@@ -90,6 +96,25 @@ describe('agent-config.sanitize', () => {
   it('coerces a non-array symbols field to an array', () => {
     const s = sanitize({ ...base(), symbols: 'BTC' as unknown as string[] }).symbols;
     assert.ok(Array.isArray(s));
+  });
+
+  // REGRESSION (2026-08-30): four ~$1000 orders went out between 18:41 and 18:46
+  // and all four settled together at 19:17, so the $1000 maxDailyLoss breaker had
+  // nothing to read until every one of them had already resolved. maxOpenNotional
+  // is the limit that bounds a BATCH, and it must survive a hostile PUT like the
+  // rest of the envelope.
+  it('keeps maxOpenNotional non-negative and bounded', () => {
+    assert.equal(sanitize({ ...base(), maxOpenNotional: -50 }).maxOpenNotional, 0);
+    assert.ok(sanitize({ ...base(), maxOpenNotional: 1e12 }).maxOpenNotional <= 1_000_000);
+  });
+
+  it('replaces a non-numeric maxOpenNotional with a finite default', () => {
+    const v = sanitize({ ...base(), maxOpenNotional: 'all of it' as unknown as number }).maxOpenNotional;
+    assert.ok(Number.isFinite(v), `expected finite, got ${v}`);
+  });
+
+  it('keeps an explicit maxOpenNotional', () => {
+    assert.equal(sanitize({ ...base(), maxOpenNotional: 40 }).maxOpenNotional, 40);
   });
 
   it('strips junk from symbols and uppercases them', () => {

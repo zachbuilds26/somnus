@@ -1,5 +1,5 @@
-import type { SomniaMarkets } from '@somnia-chain/markets-sdk';
 import { getTradingExchangeReady, withRetry } from './sdk';
+import type { SomniaMarkets } from '@somnia-chain/markets-sdk';
 
 export interface LiveOrderParams {
   /** The outcome symbol to trade — already resolved by the broker (YES for an
@@ -13,6 +13,30 @@ export interface LiveOrderParams {
 export interface LiveOrderResult {
   txHash?: string;
   reason: string;
+  /** Quantity ACTUALLY filled, human units — the SDK sums it from the pool's
+   *  `OrderFilled` events, so it is what the position is really worth.
+   *
+   *  This is not the size we asked for. An IOC that exhausts the depth at its
+   *  limit fills partially and cancels the remainder (`status: 'canceled'`), and
+   *  a cost basis recorded against the REQUESTED size then overstates the spend
+   *  by whatever never traded. That happened on 2026-08-30: 1976 contracts
+   *  requested at 0.506, 990 filled, and the ledger booked $999.86 against a
+   *  position that cost ~$501 and paid out $990 — a $489 winner recorded as a
+   *  $10 loser. */
+  filled?: number;
+  /** Quantity actually placed, after the venue floors it onto the lot grid.
+   *  `createOrder` snaps this DOWN, so it can be below what we sent. */
+  placedAmount?: number;
+  /** Limit price actually placed, after the venue snaps it onto the tick grid.
+   *  A buy snaps DOWN, so this is never worse than the price we sent. */
+  placedPrice?: number;
+  /** SDK lifecycle state: `closed` = fully filled, `canceled` = IOC remainder
+   *  that could not rest, `open` = resting (never, for IOC). */
+  status?: string;
+  /** The raw transaction receipt, when one came back. Carries `gasUsed` and
+   *  `effectiveGasPrice`, which is the only place the cost of running the agent is
+   *  observable — gas is paid in the native token and never appears in tUSDC P&L. */
+  receipt?: unknown;
 }
 
 /** Place one event-contract order for real (IOC so nothing rests unseen).
@@ -29,17 +53,6 @@ export interface LiveOrderResult {
  *  (`OrderExpiryBeyondMarket`) and `0` reverts `OrderAlreadyExpired`.        */
 export async function placeLiveOrder(p: LiveOrderParams): Promise<LiveOrderResult> {
   const exchange = await getTradingExchangeReady(false);
-  return placeLiveOrderOn(exchange, p);
-}
-
-/** Place one event-contract order on a SPECIFIC exchange instance (e.g. a
- *  per-user Agent Studio wallet). Same recovery semantics as {@link placeLiveOrder}
- *  but the caller owns the signing client, so the operator's trade key and a
- *  user's key can both route through the same logic. */
-export async function placeLiveOrderOn(
-  exchange: SomniaMarkets,
-  p: LiveOrderParams,
-): Promise<LiveOrderResult> {
   let order: Record<string, any>;
   try {
     order = await submitOn(exchange, p, false);
@@ -67,13 +80,41 @@ export async function placeLiveOrderOn(
     typeof receipt?.transactionHash === 'string' ? receipt.transactionHash : undefined;
   const status: string = typeof order?.status === 'string' ? order.status : 'unknown';
 
+  // What the venue actually did, as opposed to what we asked it to do. The SDK
+  // aligns the quantity down to the lot grid and the price down to the tick grid
+  // before placing, then reports the filled quantity summed from the pool's
+  // OrderFilled events. All three can differ from our request, and the caller
+  // needs the real numbers to record an honest cost basis.
+  const filled = num(order?.filled);
+  const placedAmount = num(order?.amount);
+  const placedPrice = num(order?.price);
+
   if (receipt?.status === 'reverted') {
     throw new Error(`order reverted on-chain${txHash ? ` (${txHash})` : ''}`);
   }
+  const fillNote =
+    filled !== undefined && placedAmount !== undefined && filled < placedAmount
+      ? ` (filled ${filled}/${placedAmount})`
+      : '';
   if (!txHash) {
-    return { reason: `${status} on ${p.symbol} @ ${p.price}` };
+    return { reason: `${status} on ${p.symbol} @ ${p.price}`, filled, placedAmount, placedPrice, status, receipt };
   }
-  return { txHash, reason: `${status} on ${p.symbol} @ ${p.price} in ${txHash}` };
+  return {
+    txHash,
+    reason: `${status} on ${p.symbol} @ ${placedPrice ?? p.price}${fillNote} in ${txHash}`,
+    filled,
+    placedAmount,
+    placedPrice,
+    status,
+    receipt,
+  };
+}
+
+/** A finite non-negative number, or undefined. Anything else is unusable as a
+ *  cost basis and must read as "unknown" rather than as zero. */
+function num(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
 async function submitOn(

@@ -7,9 +7,11 @@ import {
 } from '@somnia-chain/markets-sdk';
 import { somniaShannon, somniaMainnet } from '@somnia-chain/markets-sdk/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { sessionPrivateKey } from '@somnia-chain/markets-sdk/native';
 import { config, debug, warn } from '../config';
+import { rpcCall } from '../http';
 import type { BookTicker, NormalizedMarket } from '../types';
+
+const BALANCE_RPC_TIMEOUT_MS = Number(process.env.AGENT_BALANCE_RPC_TIMEOUT_MS ?? 8_000);
 
 /** Gateway to @somnia-chain/markets-sdk (>= 0.28.1 ??? below that, unified verbs
  *  don't snap prices to the venue tick grid and orders revert `InvalidPrice`).
@@ -170,19 +172,15 @@ export async function nativeGasBalance(address?: string): Promise<bigint | undef
     })();
   if (!addr) return undefined;
   try {
-    const res = await fetch(config.rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_getBalance',
-        params: [addr, 'latest'],
-      }),
-    });
-    const body = (await res.json()) as { result?: string; error?: { message?: string } };
-    if (body.error) return undefined;
-    return BigInt(body.result ?? '0x0');
+    // Bounded: this sits on the pre-submit path, so a hung RPC would stall an order
+    // rather than fail it, and the caller has no way to tell the difference.
+    const result = await rpcCall<string>(
+      config.rpcUrl,
+      'eth_getBalance',
+      [addr, 'latest'],
+      BALANCE_RPC_TIMEOUT_MS,
+    );
+    return BigInt(result ?? '0x0');
   } catch {
     return undefined;
   }
@@ -226,39 +224,6 @@ export async function getTradingExchangeReady(forceReload = false): Promise<Exch
     debug(`sdk: trade symbol table hydrated (forced=${forceReload})`);
   }
   return ex;
-}
-
-/** Address a session seed controls — the per-user sub-account the visitor funds
- *  and the agent trades through (non-custodial of their main wallet). */
-export function sessionSignerAddress(seed: `0x${string}`): string {
-  return privateKeyToAccount(sessionPrivateKey(seed)).address;
-}
-
-const sessionExchanges = new Map<string, { ex: Exchange; loadedAt: number }>();
-
-/** A signing client that trades AS the session account derived from `seed`.
- *  The visitor pre-funds this address; orders placed here spend the visitor's
- *  tUSDC (and STT for gas), never the operator's keys. */
-export function getSessionExchange(seed: `0x${string}`): Exchange {
-  return new SomniaMarkets({ ...baseConfig(), privateKey: sessionPrivateKey(seed) });
-}
-
-export async function getSessionExchangeReady(seed: `0x${string}`, forceReload = false): Promise<Exchange> {
-  const cached = sessionExchanges.get(seed);
-  const stale = !cached || Date.now() - cached.loadedAt > TRADE_MARKETS_TTL_MS;
-  if (!cached || forceReload || stale) {
-    const ex = cached?.ex ?? getSessionExchange(seed);
-    await withRetry('session trade loadMarkets', () => ex.loadMarkets(true));
-    sessionExchanges.set(seed, { ex, loadedAt: Date.now() });
-    debug('sdk: session trade symbol table hydrated');
-    return ex;
-  }
-  return cached.ex;
-}
-
-/** Drop any cached signing client for a revoked session seed. */
-export function forgetSessionExchange(seed: `0x${string}`): void {
-  sessionExchanges.delete(seed);
 }
 
 /** Indexer reads go over the public internet and DNS here is not always kind:
@@ -614,11 +579,44 @@ function isWebSocketFailure(err: unknown): boolean {
   return /websocket/i.test((err as Error)?.message ?? '');
 }
 
+/** True when the SDK could not resolve a symbol it is being asked about.
+ *
+ *  The read client keeps its own symbol table, and new Event Contract windows are
+ *  minted continuously — so a window discovered in one call can be unknown to the
+ *  resolver in the next. `sdk-live.ts` already reloads and retries once on exactly
+ *  this error for the WRITE client; the read path had no equivalent, so a stale
+ *  table meant every book read threw and the cycle produced no decisions at all.
+ *  That is what left the agent reporting "0 decisions, 10 errors" for hours. */
+function isStaleSymbolTable(err: unknown): boolean {
+  const msg = (err as Error)?.message ?? '';
+  return /unknown symbol/i.test(msg) || /missing or invalid parameters/i.test(msg);
+}
+
+/** Force the read client's symbol table to rebuild, and drop the market cache with
+ *  it so the next discovery call cannot re-serve rows the resolver just rejected. */
+async function reloadReadMarkets(): Promise<void> {
+  marketsCache = undefined;
+  const ex = getExchange();
+  await withRetry('read loadMarkets', () => ex.loadMarkets(true));
+  debug('sdk: read symbol table rebuilt after an unresolved symbol');
+}
+
 /** Top-of-book for a YES symbol (price = Up probability, strictly 0 < p < 1). */
 export async function eventBook(symbol: string, depth = 5): Promise<BookTicker> {
   try {
     return await eventBookOnce(symbol, depth);
   } catch (err) {
+    // A symbol the resolver does not know is usually a stale table, not a bad
+    // market. Rebuild it and try once more before giving up on the window.
+    if (isStaleSymbolTable(err)) {
+      try {
+        await reloadReadMarkets();
+        return await eventBookOnce(symbol, depth);
+      } catch (retryErr) {
+        markFeed('book', false, (retryErr as Error).message);
+        throw retryErr;
+      }
+    }
     if (!isWebSocketFailure(err)) {
       markFeed('book', false, (err as Error).message);
       throw err;

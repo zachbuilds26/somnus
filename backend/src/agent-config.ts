@@ -28,6 +28,7 @@ export function defaultAgentConfig(): AgentConfigDoc {
   // exist but are hidden behind Advanced — sensible defaults so a newbie never sees them.
   // tradeQuota is DEPRECATED: it meant "total trades ever" and at 1 blocked after one
   // fill forever. Kept for compat but always null (unlimited) unless explicitly set.
+  const maxDailyLoss = Number(process.env.AGENT_MAX_DAILY_LOSS ?? 1000);
   return {
     ...config.agent,
     claimEnabled: true,
@@ -36,7 +37,23 @@ export function defaultAgentConfig(): AgentConfigDoc {
     tradeQuota: null,
     // $1000 cap: user can lose up to $1000/day then pauses; $1000 per trade max.
     // Re-enables breaker that was 0 (unlimited). Tighten via env if needed.
-    maxDailyLoss: Number(process.env.AGENT_MAX_DAILY_LOSS ?? 1000),
+    maxDailyLoss,
+    // Default to the daily loss limit: never have more riding at once than you
+    // would accept losing in a whole day. Anything looser makes the daily limit
+    // unenforceable, because a single batch of windows settling together can
+    // blow through it before the breaker gets a chance to read the ledger.
+    maxOpenNotional: Number(process.env.AGENT_MAX_OPEN_NOTIONAL ?? maxDailyLoss),
+    // Defaults OFF. A drawdown ceiling computed over an existing ledger can halt an
+    // agent the moment it boots, on losses the operator never opted into bounding —
+    // so this is opt-in, documented, and never a surprise.
+    maxDrawdown: Number(process.env.AGENT_MAX_DRAWDOWN ?? 0),
+    // Also OFF by default: it needs a readable collateral balance, and silently
+    // switching an operator from "$5 a trade" to "2% of equity" changes their sizing
+    // without them asking.
+    maxTradeSizePctEquity: Number(process.env.AGENT_MAX_TRADE_PCT_EQUITY ?? 0),
+    maxPerExpiryBucket: Number(process.env.AGENT_MAX_PER_EXPIRY ?? 2),
+    maxSameDirection: Number(process.env.AGENT_MAX_SAME_DIRECTION ?? 0),
+    maxSettlementAgeMs: Number(process.env.AGENT_MAX_SETTLEMENT_AGE_MS ?? 1_800_000),
     maxConsecutiveLosses: Number(process.env.AGENT_MAX_CONSECUTIVE_LOSSES ?? 10),
     maxExecutionFailures: Number(process.env.AGENT_MAX_EXECUTION_FAILURES ?? 5),
     maxDataAgeMs: Number(process.env.AGENT_MAX_DATA_AGE_MS ?? 15_000),
@@ -107,6 +124,19 @@ export function sanitize(doc: AgentConfigDoc): AgentConfigDoc {
     maxPerMarket: Math.floor(num(doc?.maxPerMarket, d.maxPerMarket, 0, 100)),
     tradeQuota: quota,
     maxDailyLoss: num(doc?.maxDailyLoss, d.maxDailyLoss, 0, 1_000_000),
+    maxOpenNotional: num(doc?.maxOpenNotional, d.maxOpenNotional, 0, 1_000_000),
+    maxDrawdown: num(doc?.maxDrawdown, d.maxDrawdown, 0, 1_000_000),
+    // A per-trade fraction above ~50% of equity is not risk management, it is a
+    // coin flip with extra steps.
+    maxTradeSizePctEquity: num(doc?.maxTradeSizePctEquity, d.maxTradeSizePctEquity, 0, 0.5),
+    maxPerExpiryBucket: Math.floor(num(doc?.maxPerExpiryBucket, d.maxPerExpiryBucket, 0, 100)),
+    maxSameDirection: Math.floor(num(doc?.maxSameDirection, d.maxSameDirection, 0, 100)),
+    // Floored at a minute when enabled: a sweep bar tighter than one cycle would
+    // reject every order between sweeps and read as the agent silently refusing.
+    maxSettlementAgeMs: (() => {
+      const raw = Math.floor(num(doc?.maxSettlementAgeMs, d.maxSettlementAgeMs, 0, 86_400_000));
+      return raw === 0 ? 0 : Math.max(60_000, raw);
+    })(),
     maxConsecutiveLosses: Math.floor(num(doc?.maxConsecutiveLosses, d.maxConsecutiveLosses, 0, 100)),
     maxExecutionFailures: Math.floor(num(doc?.maxExecutionFailures, d.maxExecutionFailures, 0, 100)),
     maxDataAgeMs: rawAge === 0 ? 0 : Math.max(1_000, rawAge),

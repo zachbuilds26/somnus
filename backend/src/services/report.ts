@@ -166,7 +166,6 @@ export function buildPerformanceReport(): PerformanceReport {
     reasons.push(...blocked.map((b) => `blocked: ${b}`));
     if (risk.paused && risk.pauseReason) reasons.push(`kill switch: ${risk.pauseReason}`);
   } else if (risk.lossToday > 0 && config.maxDailyLoss > 0) {
-    const remaining = config.maxDailyLoss - risk.lossToday;
     const pct = risk.lossToday / config.maxDailyLoss;
     if (pct >= 0.8) {
       level = 'caution';
@@ -174,6 +173,21 @@ export function buildPerformanceReport(): PerformanceReport {
       reasons.push(`daily loss ${risk.lossToday.toFixed(2)} / ${config.maxDailyLoss}`);
     } else if (pct >= 0.5) {
       reasons.push(`daily loss ${risk.lossToday.toFixed(2)} / ${config.maxDailyLoss} — still inside the limit but worth watching`);
+    }
+  }
+
+  // 1b. Open exposure — the limit that bounds a BATCH, which the daily loss limit
+  // cannot see until every window in it has settled.
+  if (level !== 'halt' && config.maxOpenNotional > 0 && risk.openNotional > 0) {
+    const pct = risk.openNotional / config.maxOpenNotional;
+    if (pct >= 0.9) {
+      if (level === 'continue') level = 'caution';
+      reasons.push(
+        `open exposure ${risk.openNotional.toFixed(2)} is at ${Math.round(pct * 100)}% of the ` +
+          `${config.maxOpenNotional} ceiling — new orders will size down or be refused until positions settle`,
+      );
+    } else if (pct >= 0.6) {
+      reasons.push(`open exposure ${risk.openNotional.toFixed(2)} / ${config.maxOpenNotional}`);
     }
   }
 

@@ -1,15 +1,17 @@
 import { Router } from 'express';
-import { config } from '../config';
 import { effectiveDryRun, loadAgentConfig, sanitize, saveAgentConfig } from '../agent-config';
 import { runCycle, type RunOpts } from '../services/agent';
 import { calibrationSummary } from '../services/horizon';
 import { loopStatus, startLoop, stopLoop } from '../services/loop';
-import { claimAll, findClaimable } from '../services/settlement';
-import { appendEntry, currentAnchor, read } from '../services/store';
-import { pnlSummary, pnlRecent } from '../services/pnl';
+import { claimAll, findClaimable, sweepSettlements } from '../services/settlement';
+import { pauseTrading, resumeTrading, reviewAfterSettlement } from '../services/risk';
+import { reconcile } from '../services/reconcile';
+import { recentEvents, subscribe } from '../services/events';
+import { appendEntry, currentAnchor, readChainPage } from '../services/store';
+import { pnlSummary, pnlRecent, verifyLedgerAgainstChain } from '../services/pnl';
 import { buildPerformanceReport } from '../services/report';
-import { getPending, listPending, popPending } from '../services/pending';
-import { executeDecision } from '../services/broker';
+import { listPending, popPending } from '../services/pending';
+import { executeStandaloneDecision } from '../services/broker';
 import type { AgentConfigDoc } from '../types';
 
 export const agentRouter: Router = Router();
@@ -39,14 +41,29 @@ agentRouter.put('/agent/config', async (req, res) => {
   res.json({ ok: true, config: next, effectiveDryRun: effectiveDryRun(next) });
 });
 
-agentRouter.get('/agent/logs', (_req, res) => {
-  const limit = clamp(_req.query.limit, 100);
-  const entries = read(limit).reverse();
+/** Recent audit entries.
+ *
+ *  Filterable because a UI should not have to pull the whole chain to render one
+ *  panel. `kind` narrows to decisions or orders, `since`/`until` bound a time range,
+ *  and `cursor` pages backwards through history — the chain is already at four
+ *  figures and only grows, so "just fetch it and filter client-side" stops working
+ *  well before anyone notices it stopped working. */
+agentRouter.get('/agent/logs', (req, res) => {
+  const page = readChainPage({
+    limit: clamp(req.query.limit, 100),
+    kind: req.query.kind,
+    since: req.query.since,
+    until: req.query.until,
+    cursor: req.query.cursor,
+  });
   res.json({
     ok: true,
     dryRun: effectiveDryRun(),
     anchor: currentAnchor(),
-    entries,
+    entries: page.entries,
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
+    matched: page.matched,
   });
 });
 
@@ -72,9 +89,6 @@ agentRouter.post('/agent/run', async (req, res) => {
 
     // Simple: no preset ask — agent stays on until it finds edge. Defaults to saved minEdge.
     const hasPreset = typeof b.edgePreset === 'string' && ['very-sure', 'middle', 'a-bit-sure'].includes(String(b.edgePreset).toLowerCase());
-    const hasEdge = Number.isFinite(Number(b.minEdge)) && Number(b.minEdge) > 0;
-    // Mode optional: if not specified, treat as manual one-shot scan (loop stays off).
-    const hasModeChoice = typeof b.autoTrade === 'boolean' || b.mode === 'manual' || b.mode === 'autotrade';
 
     const opts: RunOpts = {};
     if (hasPreset) opts.edgePreset = String(b.edgePreset).toLowerCase() as RunOpts['edgePreset'];
@@ -158,7 +172,11 @@ agentRouter.post('/agent/confirm', async (req, res) => {
     if (!id) return res.status(400).json({ ok: false, error: 'provide {id} of pending trade' });
     const p = popPending(id);
     if (!p) return res.status(404).json({ ok: false, error: 'pending not found or expired (90s)' });
-    const order = await executeDecision(p.decision);
+    // Standalone, not `executeDecision`: this request is not inside a decision
+    // cycle, so the exposure baselines have to be re-established from real chain
+    // and ledger state first. Calling executeDecision directly bypassed every
+    // exposure limit — see the comment on executeStandaloneDecision.
+    const order = await executeStandaloneDecision(p.decision);
     res.json({ ok: true, order, pending: p, anchor: currentAnchor() });
   } catch (err) {
     res.status(500).json({ ok: false, error: (err as Error).message ?? String(err) });
@@ -211,6 +229,111 @@ agentRouter.post('/agent/claim', async (_req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: (err as Error).message ?? String(err) });
   }
+});
+
+/** Realise settled outcomes without redeeming anything.
+ *
+ *  Separate from /agent/claim on purpose: settlement determines P&L, redemption only
+ *  moves collateral. The loss breakers read the ledger, so this is the call that keeps
+ *  them honest — and it works in dry-run and with claiming switched off. */
+agentRouter.post('/agent/settle-sweep', async (_req, res) => {
+  const result = await sweepSettlements();
+  // A sweep can newly cross a loss limit, and the moment the loss becomes real is
+  // the right moment to stop — not the next cycle's first order.
+  const risk = reviewAfterSettlement();
+  res.json({ ok: result.error === undefined, sweep: result, risk });
+});
+
+/** Emergency stop, and the way back.
+ *
+ *  These existed as functions with no callers for a long time, which meant an
+ *  execution-failure pause could only be cleared by hand-editing
+ *  data/risk-state.json. An emergency stop you cannot reach from the API is not an
+ *  emergency stop. */
+agentRouter.post('/agent/pause', async (req, res) => {
+  const reason = String(req.body?.reason ?? '').trim() || 'paused by operator';
+  const status = pauseTrading(reason);
+  stopLoop();
+  await appendEntry({ kind: 'config', payload: { action: 'pause', reason, blocked: status.blocked } });
+  res.json({ ok: true, risk: status, loop: loopStatus() });
+});
+
+agentRouter.post('/agent/resume', async (req, res) => {
+  // Clearing the failure counter is an explicit, separate decision. Resuming says
+  // "I have looked at it"; clearing says "I fixed the venue problem the counter was
+  // measuring". Folding them together would let a resume silently re-arm an agent
+  // whose cause was never addressed.
+  const clearFailures = req.body?.clearFailures === true;
+  const status = resumeTrading({ clearFailures });
+  await appendEntry({ kind: 'config', payload: { action: 'resume', clearFailures } });
+  res.json({
+    ok: true,
+    risk: status,
+    // Resuming does not restart the loop. Arming trading and arming the scheduler
+    // are different acts and conflating them has surprised people before.
+    note: status.ok
+      ? 'trading permitted again — POST /api/agent/loop/start to resume the loop'
+      : `still blocked: ${status.blocked.join('; ')}`,
+  });
+});
+
+/** Does the chain agree with our ledger? Read-only. */
+agentRouter.get('/agent/reconcile', async (_req, res) => {
+  try {
+    const report = await reconcile();
+    res.status(report.error ? 503 : 200).json({ ok: report.ok, report });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: (err as Error).message ?? String(err) });
+  }
+});
+
+/** Live event stream for a dashboard, so every panel does not have to poll.
+ *
+ *  The proof chain stays the durable record — this is a push channel for whoever is
+ *  currently watching. A client that missed an event reads it from /proof. */
+agentRouter.get('/agent/stream', (req, res) => {
+  res.set({
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    // Nginx and friends buffer streaming responses by default, which turns an SSE
+    // feed into a single reply that arrives when the connection closes.
+    'x-accel-buffering': 'no',
+  });
+  res.flushHeaders?.();
+
+  const send = (event: { kind: string; ts: number; data: unknown }): void => {
+    res.write(`event: ${event.kind}\n`);
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  // Replay the recent buffer so a client that connects mid-cycle has context
+  // instead of an empty pane until the next tick.
+  for (const e of recentEvents(20)) send(e);
+  const unsubscribe = subscribe(send);
+
+  // Comment frames keep proxies and load balancers from reaping an idle stream —
+  // a cycle interval can be minutes, which most infrastructure reads as dead.
+  const keepalive = setInterval(() => res.write(': keepalive\n\n'), 15_000);
+
+  req.on('close', () => {
+    clearInterval(keepalive);
+    unsubscribe();
+    res.end();
+  });
+});
+
+/** Is the ledger consistent with the signed audit chain?
+ *
+ *  The proof chain is hash-linked, signed and anchored on-chain. pnl-ledger.jsonl —
+ *  the file every risk limit reads — is plain appendable JSONL with no integrity
+ *  guarantee at all, which is exactly backwards. Rather than bolt a second chain
+ *  onto it, rebuild what the ledger SHOULD contain from the signed order entries and
+ *  report the difference. A row in the ledger with no corresponding signed order is
+ *  either an edit or a bug, and both are worth knowing about. */
+agentRouter.get('/agent/pnl/verify', (_req, res) => {
+  const result = verifyLedgerAgainstChain();
+  res.json({ ...result, ok: result.ok });
 });
 
 function clamp(n: unknown, max: number): number {

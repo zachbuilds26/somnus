@@ -135,6 +135,8 @@ describe('signal.estimateFair', () => {
   const ctx = (): SignalContext => ({
     spot: new Map([['BTC', 78000]]),
     closes: new Map([['BTC', closes]]),
+    spotTs: new Map([['BTC', nowMs]]),
+    candleTs: new Map([['BTC', nowMs]]),
   });
   const nowSec = 1_800_000_000;
   const nowMs = nowSec * 1000;
@@ -170,7 +172,14 @@ describe('signal.estimateFair', () => {
 
   it('declines without spot or candles', () => {
     const r = row({ strikeRaw: '7800000', expiry: nowSec + 600 });
-    assert.equal(estimateFair(r, { spot: new Map(), closes: new Map() }, nowMs), undefined);
+    assert.equal(
+      estimateFair(
+        r,
+        { spot: new Map(), closes: new Map(), spotTs: new Map(), candleTs: new Map() },
+        nowMs,
+      ),
+      undefined,
+    );
   });
 
   it('reports the horizon sigma, not a per-minute figure', () => {

@@ -83,9 +83,15 @@ export interface OrderLog {
   txHash?: string;
   status: 'simulated' | 'submitted' | 'rejected';
   reason?: string;
-  /** When set, the order was placed through a per-user session key (non-custodial
-   *  visitor wallet) rather than the operator's trade key. */
-  owner?: string;
+  /** Quantity the venue actually filled, human units. Present on live orders.
+   *  An IOC that exhausts the depth at its limit fills partially, so this — not
+   *  `size` — is what the position is worth. */
+  filledSize?: number;
+  /** SDK lifecycle state for a live order: `closed` = fully filled,
+   *  `canceled` = IOC remainder that could not rest. */
+  fillStatus?: string;
+  /** Gas paid for this order, in the chain's native token. */
+  gasNative?: number;
   /** Edge left AFTER crossing the touch — fair value for the outcome bought minus
    *  the price actually sent. This, not the decision's edge, is what the trade was
    *  really taken on: crossing spends part of the edge to buy a fill. */
@@ -126,6 +132,10 @@ export interface FillStrategyMeta {
   freshness?: DataFreshness;
   strategyVersion: string;
   modelVersion: string;
+  /** Window expiry (unix seconds). Stored so a later study — and the correlation
+   *  caps — can bucket positions by the moment they all settle on, without parsing
+   *  the symbol string. */
+  expiry?: number;
 }
 
 export interface ProofEntry {
@@ -167,6 +177,55 @@ export interface AgentConfigDoc {
    *  itself. 0 = no limit. Per-trade size bounds ONE bad decision; this bounds a
    *  bad session, which is the failure that actually empties an account. */
   maxDailyLoss: number;
+  /** Total collateral (tUSDC) allowed to sit in positions that have not settled
+   *  yet. 0 = no limit.
+   *
+   *  This is the gap `maxDailyLoss` cannot close. A daily loss limit bounds
+   *  REALISED loss, and a binary only realises when its window settles — so a
+   *  batch of orders placed inside one interval is entirely unbounded by it.
+   *  Observed 2026-08-30: four ~$1000 orders went out between 18:41 and 18:46
+   *  and all four settled together at 19:17, putting $4000 at risk under a $1000
+   *  daily-loss limit that had nothing to fire on until every one of them had
+   *  already resolved. `maxOpenPositions` did not help either — it counts
+   *  positions, not dollars. */
+  maxOpenNotional: number;
+  /** Realised loss from the equity PEAK tolerated before the agent pauses itself,
+   *  in tUSDC. 0 = no limit (the default, so this can never halt an agent on
+   *  history it did not consent to).
+   *
+   *  `maxDailyLoss` resets at UTC midnight, so an agent bleeding just under the
+   *  limit every day never trips it and never stops. Drawdown is the limit that
+   *  bounds a losing WEEK, measured peak-to-trough over the whole settled ledger
+   *  rather than inside an arbitrary calendar boundary. */
+  maxDrawdown: number;
+  /** Per-trade cap as a fraction of equity (collateral + open cost), e.g. 0.02 for
+   *  2%. 0 = off, and `maxTradeSize` alone applies.
+   *
+   *  An absolute cap does not scale: $5 a trade is 1% of a $500 account and 10% of
+   *  the same account after it has lost 90%. Sizing on a fraction shrinks exposure
+   *  automatically as the account shrinks, which is the behaviour that keeps a bad
+   *  run from compounding. Whichever of the two is SMALLER binds. */
+  maxTradeSizePctEquity: number;
+  /** Concurrent positions allowed to share one expiry timestamp. 0 = no limit.
+   *
+   *  `maxOpenPositions` counts positions and cannot see that BTC-UP-1230 and
+   *  ETH-UP-1230 settle on the same tick against correlated assets — ten "separate"
+   *  positions can be ten expressions of one macro view, and they win or lose
+   *  together. This caps how much of the book rides on a single moment. */
+  maxPerExpiryBucket: number;
+  /** Concurrent positions allowed on the same side (all YES, or all NO). 0 = no
+   *  limit. A model with a directional bias fills the book with one direction and
+   *  calls it diversification. */
+  maxSameDirection: number;
+  /** Oldest a settlement sweep may be before the agent refuses to add risk, in ms.
+   *  0 = no limit.
+   *
+   *  The loss breakers read the P&L ledger, and the ledger only learns about a
+   *  settled position when a sweep runs. If sweeps stop — indexer down, no gas,
+   *  redeem reverting — `maxDailyLoss` and `maxConsecutiveLosses` silently read
+   *  stale data while real money is lost. Refusing to open new risk on unverifiable
+   *  losses is the only honest response. Only enforced while positions are open. */
+  maxSettlementAgeMs: number;
   /** Newly-settled losses in a row tolerated before the agent pauses itself.
    *  0 = no limit. A streak is the cheapest available signal that the model and
    *  the current regime disagree. */

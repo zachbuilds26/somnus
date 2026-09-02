@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { DATA_DIR, warn } from '../config';
@@ -88,6 +88,7 @@ export function chainStateInit(seed?: Partial<{ anchor: string; entries: ChainEn
   if (seed?.entries) chain.push(...seed.entries);
   entrySerial = chain.length;
   totalEntries = chain.length;
+  diskCache = undefined;
 }
 
 /** Canonical (key-sorted) JSON, so a payload hashes the same regardless of the
@@ -177,6 +178,9 @@ function persistLine(node: ChainEntry): void {
     appendFileSync(CHAIN_FILE, `${JSON.stringify(node)}\n`, 'utf8');
   } catch {
     // storage failure must not take down the agent loop
+  } finally {
+    // Whether or not the write landed, the parsed cache is no longer authoritative.
+    diskCache = undefined;
   }
 }
 
@@ -252,10 +256,21 @@ export function read(limit = 50): ChainEntry[] {
  *  evicting, "verify the whole chain" would quietly verify only the tail and
  *  still report ok — the failure mode where the check that is supposed to catch
  *  tampering stops looking at most of the data. Falls back to the window if the
- *  file is unreadable. */
+ *  file is unreadable.
+ *
+ *  Cached on mtime AND size, because this is no longer only the verifier's path:
+ *  `readChainPage` serves /agent/logs and /proof from it, so a dashboard with four
+ *  polling panels was re-reading 1.5 MB four times per refresh. Our own appends
+ *  invalidate directly; an external edit moves mtime or size. */
+let diskCache: { rows: ChainEntry[]; mtimeMs: number; size: number } | undefined;
+
 export function readAllFromDisk(): ChainEntry[] {
   if (!existsSync(CHAIN_FILE)) return chain.slice();
   try {
+    const s = statSync(CHAIN_FILE);
+    if (diskCache && diskCache.mtimeMs === s.mtimeMs && diskCache.size === s.size) {
+      return diskCache.rows;
+    }
     const lines = readFileSync(CHAIN_FILE, 'utf8').split('\n').filter((l) => l.trim() !== '');
     const out: ChainEntry[] = [];
     for (const line of lines) {
@@ -266,6 +281,7 @@ export function readAllFromDisk(): ChainEntry[] {
         /* torn line */
       }
     }
+    diskCache = { rows: out, mtimeMs: s.mtimeMs, size: s.size };
     return out;
   } catch {
     return chain.slice();
@@ -274,6 +290,67 @@ export function readAllFromDisk(): ChainEntry[] {
 
 export function tail(): ChainEntry | undefined {
   return chain.at(-1);
+}
+
+export interface ChainQuery {
+  limit?: number;
+  /** Restrict to one entry kind. */
+  kind?: unknown;
+  /** Inclusive lower/upper bound on entry timestamp (ms). */
+  since?: unknown;
+  until?: unknown;
+  /** Entry id to page backwards from — everything strictly OLDER than this. */
+  cursor?: unknown;
+}
+
+export interface ChainPage {
+  entries: ChainEntry[];
+  /** Pass as `cursor` to fetch the next (older) page. undefined when exhausted. */
+  nextCursor?: string;
+  hasMore: boolean;
+  /** How many entries matched the filter before the limit was applied. */
+  matched: number;
+}
+
+/** A filtered, paged window over the chain, newest first.
+ *
+ *  Reads from disk rather than the in-memory window: the window is bounded at
+ *  MAX_MEMORY_ENTRIES so a UI paging into history would silently run out of chain
+ *  and show an empty page rather than older entries.
+ *
+ *  Paging is by entry id, not by offset. Offsets shift under an append-only log —
+ *  a client that paged while the agent was trading would see the same entries twice
+ *  and miss others, which for an audit trail is worse than a slower query. */
+export function readChainPage(query: ChainQuery = {}): ChainPage {
+  const limit = Math.min(Math.max(Math.floor(Number(query.limit) || 100), 1), 1000);
+  const kind = typeof query.kind === 'string' && query.kind.length > 0 ? query.kind : undefined;
+  const since = Number.isFinite(Number(query.since)) ? Number(query.since) : undefined;
+  const until = Number.isFinite(Number(query.until)) ? Number(query.until) : undefined;
+  const cursor = typeof query.cursor === 'string' && query.cursor.length > 0 ? query.cursor : undefined;
+
+  const all = readAllFromDisk();
+  // Newest first is what every caller wants, and it makes the cursor a suffix cut.
+  let rows = all.slice().reverse();
+
+  if (cursor) {
+    const at = rows.findIndex((e) => e.id === cursor);
+    // An unknown cursor means the caller is holding an id from a different chain or a
+    // repaired one. Returning page one would silently restart their pagination, so
+    // return nothing and let them notice.
+    rows = at === -1 ? [] : rows.slice(at + 1);
+  }
+  if (kind) rows = rows.filter((e) => e.kind === kind);
+  if (since !== undefined) rows = rows.filter((e) => e.ts >= since);
+  if (until !== undefined) rows = rows.filter((e) => e.ts <= until);
+
+  const entries = rows.slice(0, limit);
+  const hasMore = rows.length > entries.length;
+  return {
+    entries,
+    nextCursor: hasMore ? entries.at(-1)?.id : undefined,
+    hasMore,
+    matched: rows.length,
+  };
 }
 
 export function currentAnchor(): string {

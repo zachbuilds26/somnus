@@ -3,8 +3,8 @@ import {
   computeHash,
   count,
   currentAnchor,
-  read,
   readAllFromDisk,
+  readChainPage,
   signerAddress,
   verifyChain,
 } from '../services/store';
@@ -13,10 +13,27 @@ import { lastAnchorInfo } from '../services/anchor';
 
 export const proofRouter: Router = Router();
 
-/** Latest audit entries, newest first. */
+/** Latest audit entries, newest first.
+ *
+ *  Supports `kind`, `since`, `until` and `cursor` so a verifier or a dashboard can
+ *  walk a range instead of downloading the chain to inspect one day of it. */
 proofRouter.get('/proof', (req, res) => {
-  const limit = clamp(req.query.limit, 250);
-  res.json({ ok: true, anchor: currentAnchor(), total: count(), entries: read(limit).reverse() });
+  const page = readChainPage({
+    limit: clamp(req.query.limit, 250),
+    kind: req.query.kind,
+    since: req.query.since,
+    until: req.query.until,
+    cursor: req.query.cursor,
+  });
+  res.json({
+    ok: true,
+    anchor: currentAnchor(),
+    total: count(),
+    entries: page.entries,
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
+    matched: page.matched,
+  });
 });
 
 /** Last on-chain anchor of the proof chain head, when anchoring is enabled. */

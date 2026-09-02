@@ -2,7 +2,10 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { config, DATA_DIR, log, debug, warn } from '../config';
+import { rpcCall, describeNetworkError } from '../http';
 import { currentAnchor } from './store';
+
+const ANCHOR_RPC_TIMEOUT_MS = Number(process.env.PROOF_ANCHOR_RPC_TIMEOUT_MS ?? 15_000);
 
 /** Periodic, tamper-evident anchoring of the proof-chain head to chain.
  *
@@ -26,14 +29,9 @@ function signerKey(): `0x${string}` | undefined {
 }
 
 async function rpc<T>(method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(config.rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const body = (await res.json()) as { result?: T; error?: { message?: string } };
-  if (body.error) throw new Error(body.error.message ?? 'rpc error');
-  return body.result as T;
+  // Bounded: this runs on a 60s interval timer, so an unbounded call could stack up
+  // pending requests indefinitely against a black-holed node.
+  return rpcCall<T>(config.rpcUrl, method, params, ANCHOR_RPC_TIMEOUT_MS);
 }
 
 /** Write the current proof anchor to chain. Skips (and says why) when there is no
@@ -97,7 +95,7 @@ export async function maybeAnchor(): Promise<void> {
       debug('proof anchor skipped:', r.skipped);
     }
   } catch (err) {
-    warn('proof anchor failed:', (err as Error).message ?? String(err));
+    warn('proof anchor failed:', describeNetworkError(err));
   }
 }
 

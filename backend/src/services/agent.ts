@@ -9,6 +9,7 @@ import { horizonPolicy, PROVISIONAL_SLOTS, type TradeablePolicy } from './horizo
 import { beginCycle, crossingPrice, executeDecision } from './broker';
 import { appendEntry } from './store';
 import { addPending } from './pending';
+import { publish } from './events';
 import type { BookTicker, Decision, OrderLog, SignalInput, SignalResult } from '../types';
 import type { PendingTrade } from './pending';
 
@@ -57,9 +58,6 @@ export interface RunOpts {
   symbols?: string[];
   /** Minimum edge required to trade this run (overrides config.minEdge). */
   minEdge?: number;
-  /** Per-user session seed: when set, orders are placed through the visitor's
-   *  funded session account instead of the operator's trade key. */
-  sessionSeed?: `0x${string}`;
   /** When true, found trades become pending asks instead of auto-executing. */
   requireConfirm?: boolean;
   edgePreset?: 'very-sure' | 'middle' | 'a-bit-sure';
@@ -74,6 +72,16 @@ export function runCycle(opts?: RunOpts): Promise<CycleResult> {
     cycleInFlight = undefined;
   });
   return cycleInFlight;
+}
+
+/** Is a decision cycle running right now?
+ *
+ *  Exported for shutdown. `waitForIdle` watched only the LOOP's busy flag, but a
+ *  manual `POST /agent/run` uses this guard instead — so a shutdown during a manual
+ *  cycle did not wait, which is exactly the between-fill-and-ledger-write gap the
+ *  graceful shutdown exists to close. */
+export function isCycleInFlight(): boolean {
+  return cycleInFlight !== undefined;
 }
 
 async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
@@ -252,6 +260,7 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
       };
       await appendEntry({ kind: 'decision', payload: { ...decision } });
       decisions.push(decision);
+      publish('decision', { ...decision });
 
       if (decision.action === 'BUY_YES' || decision.action === 'BUY_NO') {
         if (rules.mode === 'view') continue;
@@ -289,6 +298,7 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
         }
         const order = await executeDecision(decision);
         orders.push(order);
+        publish('order', { ...order });
       }
     } catch (err) {
       debug('cycle err', mk.symbol, err);

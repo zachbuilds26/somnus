@@ -3,7 +3,10 @@ import { config, debug, log, warn } from '../config';
 import { effectiveDryRun, loadAgentConfig } from '../agent-config';
 import { getExchange, getSignerAddress, getTradingExchangeReady, withRetry } from './sdk';
 import { appendEntry } from './store';
-import { recordSettlement } from './pnl';
+import { realizedSince, openNotional, recordGas, recordSettlement } from './pnl';
+import { recordSweep } from './risk';
+import { raiseAlert } from './alerts';
+import { gasCostFromReceipt } from './wallet';
 
 /** Settlement sweep — turn won positions back into collateral.
  *
@@ -223,6 +226,116 @@ export async function findClaimable(): Promise<ClaimScan> {
   };
 }
 
+export interface SweepResult {
+  ts: number;
+  /** Positions whose outcome was newly written to the ledger. */
+  realized: number;
+  winners: number;
+  losers: number;
+  /** Realised P&L this sweep added, in tUSDC. */
+  pnl: number;
+  /** Set when the sweep deliberately did nothing (no open exposure, checked recently). */
+  skipped?: string;
+  error?: string;
+}
+
+/** Realise every settled position's outcome, WITHOUT redeeming anything.
+ *
+ *  This exists because the loss breakers read the P&L ledger, and until now the
+ *  ledger only learned that a position had settled when `executeClaim` redeemed it.
+ *  That put `maxDailyLoss` and `maxConsecutiveLosses` downstream of a separate,
+ *  failure-prone subsystem: if claiming broke — indexer down, no gas, `redeemMany`
+ *  reverting, `claimEnabled` off, or simply dry-run — the agent kept trading with a
+ *  brake reading a gauge nobody was filling.
+ *
+ *  Settlement and redemption are different events and only the first one determines
+ *  P&L. A finalized window has a known winner and dreamDEX charges no settlement fee,
+ *  so the payout is already determined the moment it resolves; redeeming only moves
+ *  the collateral back into the wallet. Recording the outcome at settlement is
+ *  therefore not optimistic, it is just earlier — and it is what makes the breakers
+ *  trustworthy.
+ *
+ *  Read-only and idempotent: `recordSettlement` ignores anything already recorded and
+ *  anything we never traded, so running this every cycle is free.                */
+/** One settlement-recording operation at a time.
+ *
+ *  `recordSettlement` is read-then-write: it reads the whole ledger to check the
+ *  position was traded and not already settled, then appends. Two overlapping
+ *  callers can both pass that check and both append, double-counting one outcome.
+ *  `claimAll` was serialised against itself but not against the sweep, so
+ *  `POST /agent/settle-sweep` and `POST /agent/claim` arriving together could do
+ *  exactly that. One gate covers both, because they write the same rows.          */
+let settlementGate: Promise<unknown> = Promise.resolve();
+
+function serialised<T>(fn: () => Promise<T>): Promise<T> {
+  const run = settlementGate.then(fn);
+  settlementGate = run.catch(() => undefined);
+  return run;
+}
+
+/** How often to sweep when there is nothing open, as a safety net. The ledger can
+ *  under-report exposure (a fill whose write was lost), so "nothing open" is a strong
+ *  hint rather than proof — check anyway, just not every minute. */
+const IDLE_SWEEP_MS = Number(process.env.AGENT_IDLE_SWEEP_MS ?? 900_000);
+let lastSweepAt = 0;
+
+export function sweepSettlements(): Promise<SweepResult> {
+  return serialised(() => executeSweep());
+}
+
+async function executeSweep(): Promise<SweepResult> {
+  const result: SweepResult = { ts: Date.now(), realized: 0, winners: 0, losers: 0, pnl: 0 };
+
+  // Nothing open means nothing can settle, and this costs a portfolio read every
+  // cycle. Still run periodically, because the ledger is not the only truth — a lost
+  // write would leave real exposure the ledger cannot see.
+  if (openNotional() === 0 && Date.now() - lastSweepAt < IDLE_SWEEP_MS) {
+    result.skipped = 'nothing open';
+    return result;
+  }
+  lastSweepAt = Date.now();
+
+  try {
+    const scan = await findClaimable();
+    const before = realizedSince(0);
+
+    // Winners: payout is known from `estPayout` before any redemption happens.
+    for (const c of scan.claimable) {
+      recordSettlement(c.marketId, c.outcomeIdx, Number(c.estPayout) / 10 ** c.decimals, true, true);
+    }
+    // Losers: settled, held, and not claimable — the side we bought did not win.
+    for (const l of scan.settledLosers) {
+      recordSettlement(l.marketId, l.outcomeIdx, 0, false, true);
+    }
+
+    const after = realizedSince(0);
+    result.pnl = Math.round((after - before) * 100) / 100;
+    result.winners = scan.claimable.length;
+    result.losers = scan.settledLosers.length;
+    result.realized = result.winners + result.losers;
+    recordSweep(result);
+    if (result.pnl !== 0) {
+      log(`settlement sweep realised ${result.pnl >= 0 ? '+' : ''}${result.pnl} tUSDC`);
+    }
+    return result;
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    result.error = msg;
+    debug('settlement sweep failed:', msg);
+    recordSweep(result);
+    // A sweep that cannot run means the loss breakers are reading stale data. That
+    // is worth telling someone about, because the agent looks perfectly healthy
+    // while its most important limit is blind.
+    raiseAlert({
+      level: 'warning',
+      key: 'settlement-sweep-failed',
+      title: 'settlement sweep failed — loss breakers are reading stale P&L',
+      detail: { error: msg },
+    });
+    return result;
+  }
+}
+
 export interface ClaimResult {
   dryRun: boolean;
   claimed: ClaimableRow[];
@@ -243,7 +356,9 @@ let claimInFlight: Promise<ClaimResult> | undefined;
 
 export function claimAll(): Promise<ClaimResult> {
   if (claimInFlight) return claimInFlight;
-  claimInFlight = executeClaim().finally(() => {
+  // Shares the settlement gate with the sweep: both write settlement rows through the
+  // same read-then-write path, so serialising each against itself is not enough.
+  claimInFlight = serialised(() => executeClaim()).finally(() => {
     claimInFlight = undefined;
   });
   return claimInFlight;
@@ -306,6 +421,11 @@ async function executeClaim(): Promise<ClaimResult> {
     if (tx?.receipt?.status === 'reverted') {
       throw new Error(`redeem reverted${txHash ? ` (${txHash})` : ''}`);
     }
+    // Redemption gas belongs in the cost of running the agent. Booked as its own
+    // row because a batched redeem covers many positions and cannot be attributed
+    // to one of them.
+    const gasNative = gasCostFromReceipt(tx?.receipt);
+    if (gasNative !== undefined) recordGas(gasNative, `redeemed ${entries.length} position(s)`, txHash);
     await appendEntry({
       kind: 'claim',
       payload: {
