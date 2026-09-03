@@ -2,7 +2,26 @@ services:
   - type: web
     name: somnus-backend
     runtime: node
-    rootDir: backend
+    # Free instance. Stated explicitly because a blueprint with no `plan` defaults to
+    # a PAID one, and this project is a testnet demo that should cost nothing. The
+    # trade-off is real and worth knowing: a free service sleeps after ~15 minutes
+    # idle, so the first request after a nap takes about 50 seconds to answer while
+    # the container wakes. Call it twice; the second is instant.
+    plan: free
+    # Build and start from the REPO ROOT, not from backend/. This repo is an npm
+    # workspace: the lockfile lives at the root, so installing from the root is the
+    # only way the deploy resolves the same dependency versions the tests ran
+    # against. `npm start` at the root delegates to the backend workspace, which is
+    # also the command the README documents — one path, exercised locally and in
+    # production, rather than a deploy-only variant nobody runs until it breaks.
+    #
+    # Nothing in the runtime depends on the working directory: DATA_DIR and the .env
+    # path are both resolved from the module's own location.
+    #
+    # `tsx` is a runtime dependency here, not a dev one — `npm start` executes
+    # TypeScript directly. It sits in "dependencies" for that reason: a host that
+    # installs with NODE_ENV=production would otherwise skip it and the service would
+    # die at boot with "tsx: not found".
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
@@ -52,6 +71,11 @@ services:
         value: 1000
       - key: SOMNUS_USER_TRADES_PER_HOUR
         value: 20
+      # Each cached signing client holds a chain WebSocket, and a free instance has
+      # 512MB to play with. Six is plenty for a demo — an evicted caller just pays for
+      # a rebuilt client on their next call, which costs them nothing but a moment.
+      - key: SOMNUS_MAX_USER_CLIENTS
+        value: 6
       # A hosted agent nobody is watching needs somewhere to shout. Any endpoint
       # that accepts a JSON POST works; left unset, breakers still trip but silently.
       - key: ALERT_WEBHOOK_URL
