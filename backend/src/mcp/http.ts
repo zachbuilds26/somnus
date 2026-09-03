@@ -3,24 +3,45 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { log, warn } from '../config';
 import { registerReadTools } from './tools-read';
+import { registerUserTools } from './tools-user';
+import { IdentityError, identityFromHeaders, perUserWalletsEnabled, TOKEN_HEADER } from './identity';
+import { userTradingMode } from '../services/user-trading';
 
-/** Hosted MCP endpoint — READ-ONLY, no credential required.
+/** Hosted MCP endpoint — read tools for everyone, plus the caller's own wallet.
  *
  *  Anyone can point their coding agent at this URL:
  *
  *      claude mcp add --transport http somnus https://<host>/mcp
  *
- *  and then ask, in English, what the agent is doing and whether it can prove it.
- *  Only the read half of the tool surface is registered, which is what makes that
- *  safe to publish: there is no key to leak, nothing to spend, and no way for a
- *  stranger who knows the address to make this wallet trade. Anyone who wants the
- *  agent to trade runs the local stdio install with their own key instead — see
- *  mcp-server.ts.
+ *  and ask, in English, what the agent is doing and whether it can prove it. That
+ *  half needs no credential: the read tools sign nothing, spend nothing and change
+ *  no saved rule, so publishing the address hands out no authority over the
+ *  operator's wallet.
+ *
+ *  Add an `x-somnus-token` header and six more tools appear, backed by a wallet
+ *  DERIVED from that token (see identity.ts). The token is the only thing that
+ *  controls it, so the tools are registered per request rather than per process —
+ *  each request's server closes over that request's headers, and a caller can never
+ *  reach a wallet other than their own. With no SOMNUS_USER_SECRET configured they
+ *  are not registered at all, because a deployment should not advertise a wallet it
+ *  cannot derive.
  *
  *  Stateless on purpose (`sessionIdGenerator: undefined`): each request carries its
  *  own transport, so there is no server-side session map to grow without bound, and
  *  a restart cannot orphan a client mid-conversation. The cost is no server-initiated
- *  notifications, which a read-only surface does not need.                       */
+ *  notifications, which this surface does not need.                              */
+
+/** What a caller sees when they use a per-user tool with no token. It is the whole
+ *  onboarding path, so it says how to set the header rather than just what is wrong. */
+const NO_TOKEN =
+  `no wallet token on this request. Per-user wallets are derived from a token you choose, so ` +
+  `send one as the \`${TOKEN_HEADER}\` header:\n\n` +
+  `    claude mcp add --transport http somnus <this-url> \\\n` +
+  `      --header "${TOKEN_HEADER}: <a long random string you keep>"\n\n` +
+  `The same token always derives the same wallet, and it is the ONLY thing protecting ` +
+  `the funds in it — treat it like a password, and use at least 24 characters. The read-only ` +
+  `tools work without any of this.`;
+
 export function mountMcp(app: Express): void {
   const handler = async (req: Request, res: Response): Promise<void> => {
     // A fresh server+transport per request. Reusing one transport across concurrent
@@ -28,6 +49,13 @@ export function mountMcp(app: Express): void {
     // tools close over module state rather than holding any of their own.
     const server = new McpServer({ name: 'somnus', version: '0.1.0' });
     registerReadTools(server);
+    if (perUserWalletsEnabled()) {
+      registerUserTools(server, () => {
+        const identity = identityFromHeaders(req.headers);
+        if (!identity) throw new IdentityError(NO_TOKEN);
+        return identity;
+      });
+    }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     res.on('close', () => {
@@ -71,4 +99,12 @@ export function mountMcp(app: Express): void {
   });
 
   log('MCP endpoint mounted at POST /mcp (read-only tools, no key required)');
+  if (perUserWalletsEnabled()) {
+    log(
+      `MCP per-user wallets enabled: send ${TOKEN_HEADER} to derive one ` +
+        `(orders are ${userTradingMode() === 'live' ? 'LIVE' : 'priced but not sent'})`,
+    );
+  } else {
+    log('MCP per-user wallets disabled (set SOMNUS_USER_SECRET to enable)');
+  }
 }

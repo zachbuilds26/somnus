@@ -50,6 +50,54 @@ let committedSinceRead = 0;
 /** Native-currency symbols, so a collateral scan never mistakes gas for collateral. */
 const NATIVE_CODES = new Set(['STT', 'SOMI', 'ETH']);
 
+export interface CollateralRead {
+  collateral?: number;
+  collateralCode?: string;
+  /** Set when the balances could not be trusted, with the reason. A zero that means
+   *  "could not read" must never reach a caller as "you are broke". */
+  unreadable?: string;
+}
+
+/** Which balance is spendable collateral, out of everything the venue reports.
+ *
+ *  Extracted so the agent's wallet and a derived per-user wallet answer this the
+ *  same way. Two rules, both learned the hard way:
+ *
+ *   - skip native and outcome tokens. Outcome holdings are keyed by tradable
+ *     symbol (`BTC-…/tUSDC#YES`) and are POSITIONS, not spendable collateral;
+ *     counting them reports a wallet as funded when every dollar is already
+ *     committed to open bets.
+ *   - EVERY currency reading zero at once means unreadable, not empty.
+ *     `fetchBalance` catches per-token RPC failures and substitutes 0n, so a
+ *     network blip is indistinguishable from an empty wallet — and the
+ *     affordability gate fails CLOSED on a readable zero, which is how a healthy
+ *     wallet holding 9,577 tUSDC once got reported as `collateral: 0` and would
+ *     have refused every trade. The venue lists a dozen currencies and a real
+ *     wallet holds at least the collateral it trades with.                     */
+export function pickCollateral(
+  balances: Record<string, { free?: number; total?: number } | undefined>,
+  nativeCode?: string,
+): CollateralRead {
+  let best: { code: string; amount: number } | undefined;
+  let currencyKeys = 0;
+  let nonZeroKeys = 0;
+  for (const [code, bal] of Object.entries(balances)) {
+    if (!bal) continue;
+    if (code.includes('#') || code.includes('/')) continue;
+    if (NATIVE_CODES.has(code) || code === nativeCode) continue;
+    const amount = Number(bal.free ?? bal.total ?? 0);
+    if (!Number.isFinite(amount)) continue;
+    currencyKeys++;
+    if (amount > 0) nonZeroKeys++;
+    if (!best || amount > best.amount) best = { code, amount };
+  }
+  if (currencyKeys > 1 && nonZeroKeys === 0) {
+    return { unreadable: 'every currency read 0 — treating as unreadable, not empty' };
+  }
+  if (!best) return {};
+  return { collateral: best.amount, collateralCode: best.code };
+}
+
 export async function walletSnapshot(force = false): Promise<WalletSnapshot> {
   if (!force && cache && Date.now() - cache.ts < TTL_MS) return cache;
 
@@ -81,39 +129,12 @@ export async function walletSnapshot(force = false): Promise<WalletSnapshot> {
       { free?: number; total?: number } | undefined
     >;
 
-    // Pick the largest non-native, non-outcome-token balance. Outcome holdings are
-    // keyed by tradable symbol (`BTC-…/tUSDC#YES`) and are POSITIONS, not spendable
-    // collateral — counting them would report a wallet as funded when every last
-    // dollar is already committed to open bets.
-    let best: { code: string; amount: number } | undefined;
-    let currencyKeys = 0;
-    let nonZeroKeys = 0;
-    for (const [code, bal] of Object.entries(balances)) {
-      if (!bal) continue;
-      if (code.includes('#') || code.includes('/')) continue;
-      if (NATIVE_CODES.has(code) || code === snapshot.nativeCode) continue;
-      const amount = Number(bal.free ?? bal.total ?? 0);
-      if (!Number.isFinite(amount)) continue;
-      currencyKeys++;
-      if (amount > 0) nonZeroKeys++;
-      if (!best || amount > best.amount) best = { code, amount };
-    }
-
-    // A zero that means "could not read" must not read as "you are broke".
-    //
-    // `fetchBalance` catches per-token RPC failures and substitutes 0n, so a network
-    // blip is indistinguishable from an empty wallet — and the affordability gate
-    // fails CLOSED on a readable zero, which is how a healthy wallet with 9,577 tUSDC
-    // got reported as `collateral: 0` and would have refused every trade. The tell is
-    // that EVERY currency reads zero at once: the venue lists a dozen of them and a
-    // real wallet holds at least the collateral it trades with. Treat that as unknown.
-    if (currencyKeys > 1 && nonZeroKeys === 0) {
-      snapshot.error = [snapshot.error, 'collateral: every currency read 0 — treating as unreadable, not empty']
-        .filter(Boolean)
-        .join('; ');
-    } else if (best) {
-      snapshot.collateral = best.amount;
-      snapshot.collateralCode = best.code;
+    const picked = pickCollateral(balances, snapshot.nativeCode);
+    if (picked.unreadable) {
+      snapshot.error = [snapshot.error, `collateral: ${picked.unreadable}`].filter(Boolean).join('; ');
+    } else if (picked.collateral !== undefined) {
+      snapshot.collateral = picked.collateral;
+      snapshot.collateralCode = picked.collateralCode;
     }
   } catch (err) {
     const msg = (err as Error).message ?? String(err);

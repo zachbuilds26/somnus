@@ -479,6 +479,10 @@ export interface LedgerVerification {
    *  from `ok` because an alarm that can never be cleared is an alarm that gets
    *  ignored, and then it is worth less than no alarm at all. */
   preLedgerOrders: number;
+  /** Signed orders placed from a derived per-user wallet. Counted and excluded:
+   *  they are somebody else's positions in somebody else's wallet, so they have no
+   *  row in the agent's ledger by design. */
+  userOrders: number;
   /** Timestamp of the first ledger fill — the point comparison becomes meaningful. */
   ledgerStartTs?: number;
   note: string;
@@ -515,10 +519,19 @@ export function verifyLedgerAgainstChain(): LedgerVerification {
   // Signed, submitted, non-dry-run orders that actually put on a position.
   const chainOrders = new Map<string, { size?: number; price: number; ts: number; outcomeIdx: 0 | 1 }>();
   let preLedgerOrders = 0;
+  let userOrders = 0;
   for (const entry of readAllFromDisk()) {
     if (entry.kind !== 'order') continue;
     const p = entry.payload as Record<string, unknown>;
     if (p.status !== 'submitted' || p.dryRun === true) continue;
+    // An order signed by a derived per-user wallet is not the agent's position. The
+    // ledger holds the agent's own cost basis and feeds the agent's loss breakers, so
+    // a user's trade has no row there by design — counting it as a lost write would
+    // manufacture a permanent false alarm about drift that does not exist.
+    if (typeof p.user === 'string' && p.user.length > 0) {
+      userOrders++;
+      continue;
+    }
     const marketId = typeof p.marketId === 'string' ? p.marketId : undefined;
     if (!marketId) continue;
     // The routed symbol names the outcome that was actually bought: a Down leg buys
@@ -560,6 +573,10 @@ export function verifyLedgerAgainstChain(): LedgerVerification {
     preLedgerOrders > 0
       ? ` (${preLedgerOrders} older order(s) predate the ledger and are not counted)`
       : '';
+  const userNote =
+    userOrders > 0
+      ? ` (${userOrders} order(s) from derived user wallets are not the agent's and are not counted)`
+      : '';
   return {
     ok,
     ledgerFills: fills.length,
@@ -567,9 +584,10 @@ export function verifyLedgerAgainstChain(): LedgerVerification {
     uncorroborated,
     missingFromLedger,
     preLedgerOrders,
+    userOrders,
     ledgerStartTs,
     note: ok
-      ? `all ${fills.length} ledger fill(s) are backed by a signed order entry${preNote}`
+      ? `all ${fills.length} ledger fill(s) are backed by a signed order entry${preNote}${userNote}`
       : [
           uncorroborated.length > 0
             ? `${uncorroborated.length} ledger fill(s) have NO signed order behind them ` +
@@ -581,6 +599,8 @@ export function verifyLedgerAgainstChain(): LedgerVerification {
             : '',
         ]
           .filter(Boolean)
-          .join('; ') + preNote,
+          .join('; ') +
+        preNote +
+        userNote,
   };
 }

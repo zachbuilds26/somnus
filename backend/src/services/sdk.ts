@@ -226,6 +226,102 @@ export async function getTradingExchangeReady(forceReload = false): Promise<Exch
   return ex;
 }
 
+/** ── Per-user signing clients ────────────────────────────────────────────────
+ *
+ *  A hosted caller identifies with a token and `mcp/identity.ts` turns that token
+ *  into a wallet. Signing for it needs its OWN client: the SDK binds one account
+ *  at construction and exposes no per-call signer, so the agent's trade client
+ *  cannot be borrowed and a key cannot be passed per order.
+ *
+ *  Three properties, each learned from the trade client above:
+ *   - BOUNDED. Every client lazily opens a chain WebSocket and holds the event
+ *     loop open. One per visitor on a public endpoint is a socket leak, so this
+ *     is an LRU that closes what it evicts. Eviction costs a caller nothing but
+ *     a rebuild on their next call.
+ *   - keyed by ADDRESS, never by token or private key. The address is derived 1:1
+ *     from the key and is safe in a log line, an error message or a heap dump;
+ *     the token is the only thing protecting the wallet, so it must not become a
+ *     map key that outlives the request.
+ *   - its own symbol table, refreshed on the same TTL and for the same reason as
+ *     the trade client's — Event Contract windows are minted continuously, and a
+ *     client that hydrated a minute ago does not know the freshest ones.        */
+const MAX_USER_CLIENTS = Math.max(1, Number(process.env.SOMNUS_MAX_USER_CLIENTS ?? 12));
+
+interface UserClient {
+  ex: Exchange;
+  marketsLoadedAt: number;
+  lastUsed: number;
+}
+
+const userClients = new Map<string, UserClient>();
+
+/** Signing client for one derived user wallet. Cheap on a cache hit. */
+export function getUserExchange(privateKey: `0x${string}`, address: string): Exchange {
+  const key = address.toLowerCase();
+  const cached = userClients.get(key);
+  if (cached) {
+    cached.lastUsed = Date.now();
+    return cached.ex;
+  }
+  // Make room BEFORE constructing, so the cap is never briefly exceeded.
+  evictUserClients(MAX_USER_CLIENTS - 1);
+  const ex = new SomniaMarkets({ ...baseConfig(), privateKey });
+  userClients.set(key, { ex, marketsLoadedAt: 0, lastUsed: Date.now() });
+  debug(`sdk: user signing client ready for ${address} (${userClients.size} cached)`);
+  return ex;
+}
+
+/** As above, with the symbol table hydrated — required before `createOrder`. */
+export async function getUserExchangeReady(
+  privateKey: `0x${string}`,
+  address: string,
+  forceReload = false,
+): Promise<Exchange> {
+  const ex = getUserExchange(privateKey, address);
+  const entry = userClients.get(address.toLowerCase());
+  const loadedAt = entry?.marketsLoadedAt ?? 0;
+  if (forceReload || Date.now() - loadedAt > TRADE_MARKETS_TTL_MS) {
+    await withRetry('user loadMarkets', () => ex.loadMarkets(true));
+    if (entry) entry.marketsLoadedAt = Date.now();
+    debug(`sdk: user symbol table hydrated for ${address} (forced=${forceReload})`);
+  }
+  return ex;
+}
+
+/** Close the least recently used clients until at most `keep` remain. */
+function evictUserClients(keep: number): void {
+  const floor = Math.max(0, keep);
+  if (userClients.size <= floor) return;
+  const oldestFirst = [...userClients.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+  for (const [addr, client] of oldestFirst) {
+    if (userClients.size <= floor) break;
+    userClients.delete(addr);
+    void client.ex.close().catch(() => undefined);
+    debug(`sdk: evicted idle user client ${addr}`);
+  }
+}
+
+/** How many per-user clients are cached. Reported by /health so a socket leak is
+ *  visible rather than inferred from memory growth. */
+export function userClientCount(): number {
+  return userClients.size;
+}
+
+/** Drop every per-user client. Called on shutdown and by tests. */
+export async function closeUserExchanges(): Promise<void> {
+  const clients = [...userClients.values()];
+  userClients.clear();
+  await Promise.all(
+    clients.map(async (c) => {
+      try {
+        await c.ex.close();
+      } catch {
+        /* already closed / never opened a socket */
+      }
+    }),
+  );
+}
+
 /** Indexer reads go over the public internet and DNS here is not always kind:
  *  a single failed lookup surfaces as "indexer RegistryMarkets failed: fetch
  *  failed" and blanks the whole market board. The SDK does not retry, so we do
@@ -512,15 +608,19 @@ export async function closeExchanges(): Promise<void> {
   readExchange = undefined;
   tradeExchange = undefined;
   tradeMarketsLoadedAt = 0;
-  await Promise.all(
-    clients.map(async (c) => {
+  await Promise.all([
+    ...clients.map(async (c) => {
       try {
         await c.close();
       } catch {
         /* already closed / never opened a socket */
       }
     }),
-  );
+    // Per-user clients hold a socket each, so they have to go the same way. A
+    // script that exits with one still open hangs on Windows exactly as the read
+    // client used to.
+    closeUserExchanges(),
+  ]);
 }
 
 /** Graceful shutdown for CLI scripts: close the clients, let libuv finish

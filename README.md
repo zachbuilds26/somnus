@@ -29,7 +29,7 @@ somnus/
 └── render.yaml    # backend deployment definition
 ```
 
-**Backend only.** No frontend, no Telegram bot, no MCP server. Just a JSON API and an autonomous runtime.
+**Backend only — no frontend.** A JSON API, an autonomous runtime, and an MCP surface: a hosted endpoint anyone can interrogate (and trade through with a wallet of their own), plus a local install that runs on your machine with your key.
 
 ---
 
@@ -90,7 +90,7 @@ Set `SOMNUS_API_KEY` to require `X-API-Key` on mutating routes.
 
 Somnus speaks [MCP](https://modelcontextprotocol.io), so you can drive it from Claude Code, Cursor, or anything else that speaks the protocol. There's no frontend because **your agent is the frontend** — you ask in English and it calls the tools.
 
-There are two installs, and the difference is whose wallet is at stake.
+There are three ways in, and the difference is whose wallet is at stake.
 
 ### Watch mode — hosted, no key, 5 seconds
 
@@ -98,7 +98,7 @@ There are two installs, and the difference is whose wallet is at stake.
 claude mcp add --transport http somnus https://somnus-backend.onrender.com/mcp
 ```
 
-Twelve read-only tools. No credential, nothing to spend, nothing to steal — the hosted endpoint registers *only* the read half of the surface, so a stranger who knows the URL cannot make it trade. Ask it things like:
+Twelve read-only tools. No credential, nothing to spend, nothing to steal — nothing registered here can touch the operator's wallet or change a saved rule. (The six per-user tools below are listed too; calling one without a token answers with how to send one.) Ask it things like:
 
 - *"is somnus trading right now, and what's blocking it?"*
 - *"which timeframes does it actually trust, and on what evidence?"*
@@ -106,14 +106,40 @@ Twelve read-only tools. No credential, nothing to spend, nothing to steal — th
 
 That last one runs `somnus_proof_verify` — linkage, head match, and every signature, checked independently, with unsigned historical entries reported rather than hidden.
 
-### Trade mode — local, your own wallet, ~2 minutes
+### Your-wallet mode — hosted, your own token, ~1 minute
+
+```bash
+claude mcp add --transport http somnus https://somnus-backend.onrender.com/mcp \
+  --header "x-somnus-token: $(openssl rand -hex 24)"
+```
+
+Six more tools appear, and they act on a wallet that is **yours**. The server derives it as `HMAC(server secret, your token)` — so the same token always returns the same wallet and **nothing is stored anywhere**. There is no per-user database to back up, migrate, or lose in a deploy. Keep the token like a password: it is the only thing that controls the wallet.
+
+Then say: *"set up my somnus wallet"*
+
+`somnus_my_wallet` prints the address. Send it about **0.7 STT** of testnet gas from Somnia's public faucet, then `somnus_my_fund` draws your own tUSDC — the SDK's faucet mints **collateral only**, and minting is itself a transaction, so gas is the one step nobody can automate for you. After that: *"what would you trade for me with $5?"* (`somnus_my_quote`) and *"do it"* (`somnus_my_trade`).
+
+Why 0.7 when a trade only burns about 0.004: the venue builds transactions with a 10,000,000 gas limit at 60 gwei, and the node checks that **worst case** against your balance before it will accept one. A wallet holding less passes every local check and then dies at the node with `insufficient balance`, so the tools refuse early and name the real number instead.
+
+**This is custodial, and it is not hidden.** The server can recompute the key for any token, so it could move any caller's funds. Somnia has no scoped-permission mechanism — the SDK states plainly that a session seed "is a private key in another shape" and whoever holds it "can move the session account's funds" — so a hosted agent that trades for you necessarily holds something that could also drain you. It is acceptable here for exactly one reason: these are **testnet** wallets funded from a faucet. The code refuses to derive one on mainnet, and you should not deposit anything you would miss.
+
+What bounds a trade placed this way:
+
+- `confirm: true` on the call that spends — a quote is free, a purchase is deliberate
+- a hard per-trade cap (1000 tUSDC by default, a tenth of one faucet drip) and an hourly per-token rate limit, neither of which a tool argument can raise. Ask for more and you are clamped down and told so; ask for nothing and it stakes the cap, so name a number if you want a smaller bet
+- the operator's kill switch: a paused deployment adds no new risk of any kind, including yours
+- the same model, horizon tiers and edge bar the agent applies to its own money (you can demand *more* edge, never less)
+- your wallet's own balance — it can only spend what you funded
+- an entry in the same signed audit chain, identified by a non-reversible handle and never by your token
+
+### Operator mode — local, your own key, ~2 minutes
 
 ```bash
 git clone https://github.com/zachbuilds26/somnus && cd somnus && npm install
 claude mcp add somnus -- npx tsx backend/src/mcp-server.ts
 ```
 
-Your agent runs Somnus on **your** machine, reading **your** `backend/.env`. All 23 tools, including the 11 that move money. **Nobody hands out a private key and nobody takes custody of anyone's funds** — that's the whole reason this install exists separately from the hosted one.
+Your agent runs Somnus on **your** machine, reading **your** `backend/.env`. All 23 tools, including the 11 that move money and change limits. **Nobody hands out a private key and nobody takes custody of anyone's funds** — that's the whole reason this install exists separately from the hosted one.
 
 Then tell your agent:
 
@@ -125,14 +151,18 @@ It comes up in dry-run. Nothing reaches the chain until you say so.
 
 ### The tool surface
 
-| | Read (hosted + local) | Write (local only) |
-|---|---|---|
-| **State** | `health` `config` `explain` | `config_set` `pause` `resume` |
-| **Market** | `markets` `book` `horizons` | `scan` `confirm` |
-| **Money** | `pnl` `report` | `settle` `claim` `setup` |
-| **Trust** | `proof_verify` `pnl_verify` `reconcile` `decisions` | `loop_start` `loop_stop` `loop_status` |
+| | Read — anyone | Your wallet — hosted, with a token | Operator — local only |
+|---|---|---|---|
+| **State** | `health` `config` `explain` | `my_wallet` | `config_set` `pause` `resume` |
+| **Market** | `markets` `book` `horizons` | `my_quote` | `scan` `confirm` |
+| **Money** | `pnl` `report` | `my_fund` `my_trade` `my_positions` `my_claim` | `settle` `claim` `setup` |
+| **Trust** | `proof_verify` `pnl_verify` `reconcile` `decisions` | — | `loop_start` `loop_stop` `loop_status` |
 
-Write tools go through the same broker and the same circuit breakers as the HTTP API — MCP is another doorway onto the same enforcement, not a way past it.
+Operator tools go through the same broker and the same circuit breakers as the HTTP API — MCP is another doorway onto the same enforcement, not a way past it.
+
+Per-user tools deliberately do **not** go through the broker: it enforces the operator's mandate and writes cost basis into the ledger the operator's loss breakers read, so feeding somebody else's trades into it would fire the operator's daily-loss limit on a stranger's losses. What they share is everything that bounds a single order — the probability model, the tier policy, the crossing rule, the fill accounting and the on-chain window check.
+
+Per-user tools are registered only when the deployment sets `SOMNUS_USER_SECRET`, and their orders only reach the chain when it also sets `SOMNUS_USER_TRADING=live`. Otherwise every trade is priced, recorded and not sent.
 
 ---
 
@@ -146,7 +176,8 @@ Write tools go through the same broker and the same circuit breakers as the HTTP
 - **One process per data dir.** A lockfile enforces it; two processes would corrupt the audit chain and double-spend the position budget.
 - **It tells you when it stops.** Set `ALERT_WEBHOOK_URL` and a breaker trip, loop halt, feed blackout or unrecorded position reaches you instead of a log file.
 - **Dedicated testnet key only** — put only what you're willing to lose.
-- **The hosted MCP endpoint cannot trade.** It registers only read tools, so publishing the URL hands out no authority. Trading lives in the local install, where the person running the process owns the wallet.
+- **The hosted endpoint cannot touch the operator's wallet.** Publishing the URL hands out no authority over it: the read tools spend nothing, and the per-user tools spend only the wallet the caller's own token derives. Trading the operator's wallet lives in the local install, where the person running the process owns the key.
+- **Per-user wallets are custodial and testnet-only.** The server derives them, so it can move them; the code refuses on mainnet, and orders are priced-but-not-sent unless the operator sets `SOMNUS_USER_TRADING=live`.
 - **Loop is off by default** — `POST /api/agent/loop/start` or `AGENT_AUTOSTART=true` to arm it.
 
 ---

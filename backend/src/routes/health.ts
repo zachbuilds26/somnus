@@ -3,10 +3,12 @@ import { config } from '../config';
 import { effectiveDryRun, loadAgentConfig } from '../agent-config';
 import { fetchSpotMarkets } from '../services/markets';
 import { loopStatus } from '../services/loop';
-import { feedHealthReport, feedStaleMs } from '../services/sdk';
+import { feedHealthReport, feedStaleMs, userClientCount } from '../services/sdk';
 import { riskStatus } from '../services/risk';
 import { clockState } from '../services/clock';
 import { walletSnapshot } from '../services/wallet';
+import { maxUserStake, userTradingMode } from '../services/user-trading';
+import { perUserWalletsEnabled } from '../mcp/identity';
 import { alertsConfigured, recentAlerts } from '../services/alerts';
 import { lockInfo } from '../services/lock';
 import { currentAnchor, count } from '../services/store';
@@ -115,6 +117,16 @@ healthRouter.get('/health', async (_req, res) => {
     },
     instance: lockInfo(),
     loop: loopStatus(),
+    // Per-user wallets: whether this deployment derives them at all, whether their
+    // orders actually reach the chain, and how many signing clients are cached. The
+    // last one matters because each client holds a chain WebSocket, so a leak shows
+    // up here as a climbing number rather than as unexplained memory growth.
+    perUserWallets: {
+      enabled: perUserWalletsEnabled(),
+      mode: userTradingMode(),
+      maxPerTrade: maxUserStake(),
+      cachedClients: userClientCount(),
+    },
     proofAnchor: currentAnchor(),
     proofEntries: count(),
     ts: Date.now(),

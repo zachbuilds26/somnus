@@ -52,7 +52,28 @@ export interface LiveOrderResult {
  *  market's own expiry — the pool rejects anything beyond it
  *  (`OrderExpiryBeyondMarket`) and `0` reverts `OrderAlreadyExpired`.        */
 export async function placeLiveOrder(p: LiveOrderParams): Promise<LiveOrderResult> {
-  const exchange = await getTradingExchangeReady(false);
+  return placeOrderOn(await getTradingExchangeReady(false), p);
+}
+
+/** The same submission, on a signer the caller supplies.
+ *
+ *  Exists for per-user wallets: the SDK binds one account per client at
+ *  construction, so a derived user wallet signs through its own instance (see
+ *  `getUserExchangeReady`). Everything downstream of the signature is identical
+ *  and deliberately shared — the lot-grid refusal, the stale-symbol retry, the
+ *  revert check and the read-what-actually-happened accounting are properties of
+ *  the venue, not of whose key paid, and a second copy of them would drift.   */
+export async function placeOrderOnExchange(
+  exchange: SomniaMarkets,
+  p: LiveOrderParams,
+): Promise<LiveOrderResult> {
+  return placeOrderOn(exchange, p);
+}
+
+async function placeOrderOn(
+  exchange: SomniaMarkets,
+  p: LiveOrderParams,
+): Promise<LiveOrderResult> {
   let order: Record<string, any>;
   try {
     order = await submitOn(exchange, p, false);

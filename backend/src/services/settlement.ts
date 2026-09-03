@@ -69,6 +69,59 @@ export interface ClaimScan {
 /** Market lifecycle states that mean the position is done — no longer exposure. */
 const SETTLED_STATUSES = new Set(['Finalized', 'Resolved', 'Voided']);
 
+/** One non-zero outcome balance held by an address, with the market context the
+ *  indexer returns alongside it. */
+export interface HeldPosition {
+  marketId: string;
+  outcomeIdx: 0 | 1;
+  /** Raw integer balance, in the collateral's own decimals. */
+  amount: string;
+  /** Human units, safe to display. */
+  amountHuman: number;
+  status: string;
+  /** True once the window has resolved — no longer open exposure. */
+  settled: boolean;
+  asset?: string;
+  expiry?: number;
+  decimals: number;
+}
+
+/** Every outcome position an address still holds. Read-only and keyless: the
+ *  read client answers for any address, which is what lets one process report on
+ *  the agent's wallet and on a derived per-user wallet without a key for either.
+ *
+ *  `getPortfolio` rather than paging `listBinaryMarkets` — see `findClaimable`
+ *  for why that alternative silently misses real positions.                    */
+export async function heldPositions(address: string): Promise<HeldPosition[]> {
+  const out: HeldPosition[] = [];
+  if (!address) return out;
+  const ex = getExchange();
+  const portfolio = (await withRetry('getPortfolio', () => ex.client.getPortfolio(address))) as {
+    positions?: Array<Record<string, any>>;
+  };
+  for (const p of portfolio?.positions ?? []) {
+    const amount = toBig(p.balance);
+    if (amount <= 0n) continue;
+    const m = (p.market ?? {}) as Record<string, any>;
+    const marketId = String(m.id ?? '');
+    if (!marketId) continue;
+    const status = String(m.status ?? '');
+    const decimals = Number(m.quoteDecimals ?? 6);
+    out.push({
+      marketId,
+      outcomeIdx: Number(p.outcomeIndex) === 1 ? 1 : 0,
+      amount: String(amount),
+      amountHuman: Number(amount) / 10 ** decimals,
+      status,
+      settled: SETTLED_STATUSES.has(status),
+      asset: m.asset ? String(m.asset) : undefined,
+      expiry: m.expiry === undefined ? undefined : Number(m.expiry),
+      decimals,
+    });
+  }
+  return out;
+}
+
 /** How many positions are still OPEN on-chain: non-zero outcome balances in
  *  markets that haven't settled yet.
  *
@@ -88,23 +141,18 @@ export async function countOpenByMarket(): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   const signer = getSignerAddress();
   if (!signer) return out;
-  const ex = getExchange();
-  const portfolio = (await withRetry('getPortfolio', () => ex.client.getPortfolio(signer))) as {
-    positions?: Array<Record<string, any>>;
-  };
-  for (const p of portfolio?.positions ?? []) {
-    if (toBig(p.balance) <= 0n) continue;
-    const m = (p.market ?? {}) as Record<string, any>;
-    const status = String(m.status ?? '');
-    if (SETTLED_STATUSES.has(status)) continue;
-    const id = String(m.id ?? '');
-    if (!id) continue;
-    out.set(id, (out.get(id) ?? 0) + 1);
+  for (const p of await heldPositions(signer)) {
+    if (p.settled) continue;
+    out.set(p.marketId, (out.get(p.marketId) ?? 0) + 1);
   }
   return out;
 }
 
-/** Find every settled position the signer can redeem. Read-only.
+/** Find every settled position an address can redeem. Read-only.
+ *
+ *  Defaults to the agent's own signer; pass an address to scan a derived per-user
+ *  wallet with the same rules. Keyless either way — claimability is a property of
+ *  the market and the balance, not of who holds the key.
  *
  *  Uses `getPortfolio`, which returns the wallet's non-zero outcome positions
  *  with market context in one round-trip. The obvious alternative — page through
@@ -112,8 +160,8 @@ export async function countOpenByMarket(): Promise<Map<string, number>> {
  *  quietly wrong: the market list is paged and sorted by creation, so a real
  *  position in an older or off-page window is reported as "nothing to claim".
  *  Verified against a genuine on-chain fill that a 400-market scan missed.    */
-export async function findClaimable(): Promise<ClaimScan> {
-  const signer = getSignerAddress();
+export async function findClaimable(address?: string): Promise<ClaimScan> {
+  const signer = address ?? getSignerAddress();
   if (!signer) {
     return {
       signer: undefined,

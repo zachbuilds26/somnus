@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerReadTools } from './mcp/tools-read';
 import { registerWriteTools } from './mcp/tools-write';
+import { registerUserTools } from './mcp/tools-user';
+import { identityFromToken, perUserWalletsEnabled } from './mcp/identity';
 
 /** Local MCP server — the full surface, over stdio.
  *
@@ -28,6 +30,21 @@ const server = new McpServer({ name: 'somnus', version: '0.1.0' });
 registerReadTools(server);
 registerWriteTools(server);
 
+/** Derived-wallet tools, off by default locally.
+ *
+ *  A local install already owns a wallet, so a second one derived from a token is
+ *  redundant here — and two wallets in one process is exactly the kind of ambiguity
+ *  that gets money sent from the wrong one. Registered only when the operator sets
+ *  BOTH halves explicitly, which makes it opt-in rather than incidental: useful for
+ *  exercising the hosted path locally, silent otherwise. */
+const localToken = process.env.SOMNUS_USER_TOKEN;
+const perUser = perUserWalletsEnabled() && typeof localToken === 'string' && localToken.length > 0;
+if (perUser) {
+  registerUserTools(server, () => identityFromToken(localToken as string));
+}
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
-toStderr('[somnus-mcp] stdio server ready — read + write tools registered');
+toStderr(
+  `[somnus-mcp] stdio server ready — read + write${perUser ? ' + per-user wallet' : ''} tools registered`,
+);

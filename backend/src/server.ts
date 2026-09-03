@@ -53,10 +53,13 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  *  public read-only endpoint would be unreachable without handing out the key that
  *  also authorises trading — exactly backwards.
  *
- *  This is safe because the exemption is not a trust decision about the caller: the
- *  hosted MCP endpoint registers ONLY read tools (see mcp/http.ts), so there is no
- *  privileged operation behind it to reach. Anything that spends lives in the local
- *  stdio server, which has no HTTP surface at all. */
+ *  This stays correct now that /mcp can also carry per-user wallet tools (see
+ *  mcp/tools-user.ts), because the exemption is still not a trust decision about the
+ *  caller. The gateway key authorises OPERATOR actions — changing the saved limits,
+ *  trading the operator's wallet — and none of those are registered behind /mcp. The
+ *  authority for a per-user tool is the caller's own `x-somnus-token`, which derives
+ *  a wallet only they funded; requiring the operator's key on top would make a public
+ *  endpoint unusable without publishing the very credential it protects. */
 const KEY_EXEMPT_PATHS = new Set(['/mcp']);
 
 if (config.apiKey) {
@@ -79,8 +82,9 @@ app.use('/api', proofRouter);
 // Prometheus scrape endpoint. Deliberately NOT under /api: scrapers expect /metrics
 // at the root, and it is a read-only text rendering of state /health already exposes.
 app.use(metricsRouter);
-// Read-only MCP at POST /mcp, so any coding agent can inspect this agent without a
-// key. Trading tools deliberately live only in the local stdio server.
+// MCP at POST /mcp: read-only tools for anyone with the URL, plus per-user wallet
+// tools for a caller who sends their own x-somnus-token. The operator's wallet is not
+// reachable from here — trading it lives in the local stdio server.
 mountMcp(app);
 
 

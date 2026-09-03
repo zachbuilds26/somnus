@@ -29,6 +29,29 @@ services:
         value: 1000
       - key: SOMNUS_API_KEY
         generateValue: true
+      # Per-user wallets on the public /mcp endpoint: a caller sends their own
+      # x-somnus-token and gets a wallet derived from it (HMAC of this secret and
+      # their token), which the agent's model then trades on their behalf.
+      #
+      # Generated, not committed — and generated ONCE per service. Recreating the
+      # service mints a new secret, which silently re-points every caller at a new
+      # empty wallet: acceptable only because these are faucet-funded testnet
+      # balances. The derivation is custodial (this server can derive any token's
+      # key), which is why the code refuses to do any of this on mainnet.
+      - key: SOMNUS_USER_SECRET
+        generateValue: true
+      # Callers' confirmed trades reach the chain. Set to `simulate` to price and
+      # record them without sending. Independent of DRY_RUN above, which governs
+      # the operator's own wallet — this authorises spending from theirs.
+      - key: SOMNUS_USER_TRADING
+        value: live
+      # Hard cap per caller trade, and per token per hour. No tool argument can
+      # raise either. 1000 suits the faucet's 10,000 tUSDC drip — ten full-size
+      # trades before a caller has to draw again.
+      - key: SOMNUS_USER_MAX_TRADE
+        value: 1000
+      - key: SOMNUS_USER_TRADES_PER_HOUR
+        value: 20
       # A hosted agent nobody is watching needs somewhere to shout. Any endpoint
       # that accepts a JSON POST works; left unset, breakers still trip but silently.
       - key: ALERT_WEBHOOK_URL
