@@ -16,6 +16,11 @@ const BALANCE_RPC_TIMEOUT_MS = Number(process.env.AGENT_BALANCE_RPC_TIMEOUT_MS ?
 /** Gateway to @somnia-chain/markets-sdk (>= 0.28.1 ??? below that, unified verbs
  *  don't snap prices to the venue tick grid and orders revert `InvalidPrice`).
  *
+ *  Pinned to ^0.29.0. Worth knowing why the range matters here: on a 0.x package a
+ *  caret does NOT cross the minor, so `^0.28.1` meant `>=0.28.1 <0.29.0` and npm
+ *  would never have picked up 0.29.0 on its own. This is the library that signs and
+ *  places every order, so silently sitting on an old minor is not a safe default.
+ *
  *  Reads are KEYLESS. `privateKey` is optional in the SDK and only writes need
  *  it, so market discovery and order books work with nothing configured ??? the
  *  demo shows live Event Contracts out of the box. Writes go through

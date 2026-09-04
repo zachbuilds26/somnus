@@ -22,13 +22,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@somnia-chain/markets-sdk": "^0.28.1",
+    "@somnia-chain/markets-sdk": "^0.29.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "tsx": "^4.19.0",
     "viem": "^2.21.0",
-    "zod": "^4.5.4",
-    "tsx": "^4.19.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
