@@ -14,8 +14,15 @@ import { getTradingExchange, nativeGasBalance } from './sdk';
  *  native token. Having one and not the other still means you cannot trade, which
  *  is why they are reported separately and never summed.                        */
 
-/** Minimum native balance worth attempting a transaction with. */
-export const MIN_GAS_NATIVE = Number(process.env.AGENT_MIN_GAS_NATIVE ?? 0.02);
+/** Minimum native balance worth attempting a transaction with.
+ *
+ *  0.7, not the 0.02 this used to be. The venue builds Event Contract transactions
+ *  with a 10,000,000 gas limit at 60 gwei, so the node demands roughly 0.6 native
+ *  of headroom before it will accept one — even though the actual burn is ~0.005.
+ *  At 0.02 `canAfford()` green-lit wallets the node then rejected, which converted
+ *  a clean early refusal into a wasted attempt plus an execution-failure count,
+ *  and five of those pause the agent. Measured against Somnia testnet, not guessed. */
+export const MIN_GAS_NATIVE = Number(process.env.AGENT_MIN_GAS_NATIVE ?? 0.7);
 
 export interface WalletSnapshot {
   /** Collateral available to buy contracts, human units. */

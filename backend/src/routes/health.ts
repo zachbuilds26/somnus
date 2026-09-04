@@ -11,7 +11,7 @@ import { maxUserStake, userTradingMode } from '../services/user-trading';
 import { perUserWalletsEnabled } from '../mcp/identity';
 import { alertsConfigured, recentAlerts } from '../services/alerts';
 import { lockInfo } from '../services/lock';
-import { currentAnchor, count } from '../services/store';
+import { currentAnchor, count, chainWriteFailure } from '../services/store';
 
 export const healthRouter: Router = Router();
 
@@ -129,6 +129,10 @@ healthRouter.get('/health', async (_req, res) => {
     },
     proofAnchor: currentAnchor(),
     proofEntries: count(),
+    // Present ONLY when the durable write is failing. `proofEntries` counts what is
+    // in memory, so without this a service whose disk is full reports a healthily
+    // rising entry count while the audit trail is being lost on every restart.
+    ...(chainWriteFailure() ? { proofChainWriteFailure: chainWriteFailure() } : {}),
     ts: Date.now(),
   });
 });

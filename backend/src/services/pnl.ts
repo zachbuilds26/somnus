@@ -175,7 +175,14 @@ export interface PnlSummary {
   winRate: number;
   realizedPnl: number;
   openCost: number;
-  claimedPayout: number;
+  /** Payout of every SETTLED winning position, whether or not it has been redeemed.
+   *
+   *  Named `claimedPayout` until it was pointed out that the name asserted something
+   *  the number never checked: the settlement sweep records winners with
+   *  `unclaimed: true`, and those are summed here too. So this is money the venue
+   *  owes you, not money you have collected. `realizedPnl` was always right — it is
+   *  computed from the same settled rows — only the label lied. */
+  settledPayout: number;
   /** Gas spent across every recorded transaction, in the chain's NATIVE token.
    *  Reported beside `realizedPnl` rather than inside it — they are different
    *  assets. A strategy that looks break-even in tUSDC can still be losing money
@@ -194,7 +201,7 @@ export function pnlSummary(): PnlSummary {
   let totalFillCost = 0;
   const costByKey = new Map<string, number>();
   const settleKeys = new Set<string>();
-  let claimedPayout = 0;
+  let settledPayout = 0;
   let wins = 0;
   let losses = 0;
   let gasSpentNative = 0;
@@ -214,7 +221,7 @@ export function pnlSummary(): PnlSummary {
       const k = keyOf(r.marketId, r.outcomeIdx);
       settleKeys.add(k);
       if (r.won) {
-        claimedPayout += r.payout;
+        settledPayout += r.payout;
         wins++;
       } else {
         losses++;
@@ -225,7 +232,7 @@ export function pnlSummary(): PnlSummary {
   let settledCost = 0;
   for (const k of settleKeys) settledCost += costByKey.get(k) ?? 0;
   const openCost = totalFillCost - settledCost;
-  const realizedPnl = claimedPayout - settledCost;
+  const realizedPnl = settledPayout - settledCost;
   const closed = settleKeys.size;
   const dd = drawdownState();
 
@@ -238,7 +245,7 @@ export function pnlSummary(): PnlSummary {
     winRate: closed > 0 ? wins / closed : 0,
     realizedPnl: round2(realizedPnl),
     openCost: round2(Math.max(0, openCost)),
-    claimedPayout: round2(claimedPayout),
+    settledPayout: round2(settledPayout),
     gasSpentNative: Math.round(gasSpentNative * 1e6) / 1e6,
     drawdown: dd.drawdown,
     peakEquity: dd.peak,

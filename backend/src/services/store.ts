@@ -171,13 +171,47 @@ function loadPersistedChain(): number {
   return restored.length;
 }
 
+/** Has a proof-chain write ever failed, and why.
+ *
+ *  A silent `catch` here meant a full or read-only disk produced an agent whose
+ *  entries lived only in memory: `/health` went on reporting `proofEntries`
+ *  climbing, every /proof read looked normal, and the entire audit trail vanished
+ *  on restart. For a project whose central claim is "signed, verifiable history",
+ *  losing the history quietly is the worst available failure. `risk.ts` already
+ *  warns in this exact situation; this did not. */
+let writeFailure: { at: number; error: string; count: number } | undefined;
+
+/** Non-null when the durable chain write has failed. Surfaced on /health so a lost
+ *  audit trail is visible without reading the logs. */
+export function chainWriteFailure(): { at: number; error: string; count: number } | undefined {
+  return writeFailure;
+}
+
 /** Append one entry to the durable JSONL store. Never throws into the caller. */
 function persistLine(node: ChainEntry): void {
   try {
     mkdirSync(DATA_DIR, { recursive: true });
     appendFileSync(CHAIN_FILE, `${JSON.stringify(node)}\n`, 'utf8');
-  } catch {
-    // storage failure must not take down the agent loop
+    // Recovered. Keep the incident out of /health once writes land again, so the
+    // flag means "right now", not "at some point today".
+    if (writeFailure) {
+      warn(`proof chain writes recovered after ${writeFailure.count} failure(s)`);
+      writeFailure = undefined;
+    }
+  } catch (err) {
+    const error = (err as Error).message ?? String(err);
+    // Warn on the first failure only — this sits on the append path and a read-only
+    // disk would otherwise emit one line per entry forever. The count keeps the
+    // scale visible without the noise.
+    if (!writeFailure) {
+      warn(
+        `PROOF CHAIN WRITE FAILED (${error}) — entries are being kept in memory only and will be ` +
+          `LOST on restart. Check disk space and permissions on ${DATA_DIR}.`,
+      );
+      writeFailure = { at: Date.now(), error, count: 1 };
+    } else {
+      writeFailure = { at: Date.now(), error, count: writeFailure.count + 1 };
+    }
   } finally {
     // Whether or not the write landed, the parsed cache is no longer authoritative.
     diskCache = undefined;

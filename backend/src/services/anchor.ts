@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
-import { config, DATA_DIR, log, debug, warn } from '../config';
+import { activeKey, config, DATA_DIR, log, debug, warn } from '../config';
 import { rpcCall, describeNetworkError } from '../http';
 import { currentAnchor } from './store';
 
@@ -22,12 +22,6 @@ const ANCHOR_RPC_TIMEOUT_MS = Number(process.env.PROOF_ANCHOR_RPC_TIMEOUT_MS ?? 
 
 const ANCHOR_PATH = join(DATA_DIR, 'proof-anchor.json');
 
-function signerKey(): `0x${string}` | undefined {
-  const k = config.privateKey ?? config.tradeKey ?? config.operatorKey;
-  if (!k) return undefined;
-  return (k.startsWith('0x') ? k : `0x${k}`) as `0x${string}`;
-}
-
 async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   // Bounded: this runs on a 60s interval timer, so an unbounded call could stack up
   // pending requests indefinitely against a black-holed node.
@@ -37,7 +31,7 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
 /** Write the current proof anchor to chain. Skips (and says why) when there is no
  *  key, we're in dry-run, or the chain is still at genesis. Returns the tx hash. */
 export async function anchorProofHead(): Promise<{ txHash: string } | { skipped: string }> {
-  const key = signerKey();
+  const key = activeKey();
   if (!key) return { skipped: 'no signing key configured' };
   if (config.dryRun) return { skipped: 'DRY_RUN — would not write to chain' };
   const anchor = currentAnchor();

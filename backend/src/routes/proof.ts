@@ -48,10 +48,31 @@ proofRouter.get('/proof/anchor', (_req, res) => {
  *  Per-entry linkage alone is not enough: `verifyChain` derives each cursor from
  *  the entry's own `prevHash`, so a running anchor that has drifted out of step
  *  with the chain still passes every link while being wrong. Without this check
- *  the endpoint answers "ok" to a question nobody asked.                      */
+ *  the endpoint answers "ok" to a question nobody asked.
+ *
+ *  Reachable without the gateway key (see `KEY_EXEMPT_PATHS`), because "anyone can
+ *  audit the chain" is the project's central claim and a POST that needs a secret
+ *  does not deliver it. It is a POST only because it takes a body — it mutates
+ *  nothing. The entry cap below is what makes that safe to expose.            */
+const MAX_VERIFY_ENTRIES = 5_000;
+
 proofRouter.post('/proof/verify', async (req, res) => {
   try {
     const body = (req.body ?? {}) as { prevAnchor?: string; entries?: unknown[] };
+
+    // Each entry costs an ECDSA recover, and this route takes no key. Without a
+    // ceiling one unauthenticated request could pin a CPU for as long as it liked.
+    if (Array.isArray(body.entries) && body.entries.length > MAX_VERIFY_ENTRIES) {
+      res.status(413).json({
+        ok: false,
+        error:
+          `${body.entries.length} entries exceeds the ${MAX_VERIFY_ENTRIES} per-request limit — ` +
+          'each one costs a signature recovery. Verify in pages, or omit `entries` to have the ' +
+          'server verify its own full chain from genesis.',
+      });
+      return;
+    }
+
     const isSlice = Array.isArray(body.entries) || typeof body.prevAnchor === 'string';
     const prev: string = typeof body.prevAnchor === 'string' ? body.prevAnchor : '0'.repeat(64);
     const all = readAllFromDisk();

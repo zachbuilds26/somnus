@@ -5,6 +5,14 @@ import { riskStatus } from './risk';
 import { feedHealthReport } from './sdk';
 import { loopStatus } from './loop';
 
+/** How many settled trades travel in `samples.settled`.
+ *
+ *  This report is returned whole as an MCP tool result, so every row here is spent
+ *  from an AI's context window. The breakdown tables already aggregate the full
+ *  history; the samples are there to show what a row looks like and to let a caller
+ *  spot-check the recent run. */
+const SAMPLE_LIMIT = 50;
+
 /**
  * Performance report — what the agent has actually done, and what it should do next.
  *
@@ -59,6 +67,9 @@ export interface PerformanceReport {
     }>;
   };
   samples: {
+    /** Total settled trades on record — the aggregates cover all of these, even
+     *  though `settled` below is only the most recent `SAMPLE_LIMIT` of them. */
+    settledCount: number;
     settled: ReturnType<typeof settledTrades>;
     recent: ReturnType<typeof settledTrades>;
   };
@@ -297,7 +308,16 @@ export function buildPerformanceReport(): PerformanceReport {
     loop,
     calibration,
     breakdown: { byHorizon: byHorizonRows, byAsset: byAssetRows, byTier: byTierRows },
-    samples: { settled, recent: settled.slice(-20).reverse() },
+    // `settled` was the ENTIRE settled history, and `somnus_report` returns this whole
+    // object as one MCP tool result — which lands in an AI's context window and grows
+    // without bound as the agent trades. The aggregates above already summarise every
+    // trade; the samples exist to show the shape, so the most recent window is enough.
+    // `settledCount` keeps the total honest now that the list is a tail.
+    samples: {
+      settledCount: settled.length,
+      settled: settled.slice(-SAMPLE_LIMIT),
+      recent: settled.slice(-20).reverse(),
+    },
     recommendation: { level, action, reasons, suggestedConfig },
   };
 }

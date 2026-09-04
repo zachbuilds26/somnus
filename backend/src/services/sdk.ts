@@ -7,7 +7,7 @@ import {
 } from '@somnia-chain/markets-sdk';
 import { somniaShannon, somniaMainnet } from '@somnia-chain/markets-sdk/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { config, debug, warn } from '../config';
+import { activeKey, config, debug, warn } from '../config';
 import { rpcCall } from '../http';
 import type { BookTicker, NormalizedMarket } from '../types';
 
@@ -141,17 +141,10 @@ export function getExchange(): Exchange {
   return readExchange;
 }
 
-/** The configured signing key, normalized to 0x-prefixed hex. */
-function tradeKey(): `0x${string}` | undefined {
-  const key = config.tradeKey ?? config.privateKey ?? config.operatorKey;
-  if (!key) return undefined;
-  return (key.startsWith('0x') ? key : `0x${key}`) as `0x${string}`;
-}
-
 /** Address of the signing wallet, or undefined when running read-only.
  *  Neither `exchange.trader` nor the exchange exposes this, so derive it. */
 export function getSignerAddress(): string | undefined {
-  const key = tradeKey();
+  const key = activeKey();
   if (!key) return undefined;
   return privateKeyToAccount(key).address;
 }
@@ -167,7 +160,7 @@ export async function nativeGasBalance(address?: string): Promise<bigint | undef
   const addr =
     address ??
     (() => {
-      const k = tradeKey();
+      const k = activeKey();
       return k ? privateKeyToAccount(k).address : undefined;
     })();
   if (!addr) return undefined;
@@ -186,12 +179,12 @@ export async function nativeGasBalance(address?: string): Promise<bigint | undef
   }
 }
 
-/** Signing client ??? the ONLY path that needs a key. Prefers the scoped trade/
- *  session key; falls back to PRIVATE_KEY. The operator key is a last resort
- *  and should never be the day-to-day signer.                                */
+/** Signing client ??? the ONLY path that needs a key. Resolves through
+ *  `activeKey()`, the single answer to "which wallet does this process act with",
+ *  so orders are signed by the same wallet that signs the audit chain.        */
 export function getTradingExchange(): Exchange {
   if (tradeExchange) return tradeExchange;
-  const privateKey = tradeKey();
+  const privateKey = activeKey();
   if (!privateKey) {
     throw new Error(
       'live execution needs a key (TRADE_KEY or PRIVATE_KEY) in backend/.env ??? ' +
@@ -759,6 +752,25 @@ async function eventBookOnce(symbol: string, depth: number): Promise<BookTicker>
 /** Milliseconds since the last successful feed read, or undefined if none yet. */
 export function feedStaleMs(): number | undefined {
   return lastFeedSuccessTs === undefined ? undefined : Date.now() - lastFeedSuccessTs;
+}
+
+/** One cheap read whose only job is to refresh feed health.
+ *
+ *  Exists so the loop can wait out a dead order-book feed instead of stopping: a
+ *  scheduler that skips the cycle also skips every book read, so the staleness that
+ *  caused the wait could never clear and the agent would sit blocked forever on a
+ *  condition it had stopped measuring. One market list plus one book read is the
+ *  smallest thing that answers "can we see the market yet". */
+export async function probeFeeds(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const rows = await listEventMarketRows();
+    const first = rows[0];
+    if (!first) return { ok: false, error: 'indexer listed no live windows' };
+    await eventBook(first.symbol, 1);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message ?? String(err) };
+  }
 }
 
 /** Rebuild the read client if the feed has been silent too long. Call from the

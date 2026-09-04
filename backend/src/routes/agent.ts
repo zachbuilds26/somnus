@@ -32,6 +32,22 @@ agentRouter.get('/agent/config', (_req, res) => {
 
 agentRouter.put('/agent/config', async (req, res) => {
   const body = (req.body ?? {}) as Partial<AgentConfigDoc>;
+
+  // The kill switch is not an ordinary config field, and this was a second way to
+  // clear it. `{tradingPaused:false}` here skipped `resumeTrading()` entirely: no
+  // alert fired, the deliberate `clearExecutionFailures` decision was never made,
+  // and the resume left no trace beyond a generic config entry. One door, which
+  // logs, rather than two of which one is quiet.
+  if ('tradingPaused' in body) {
+    res.status(400).json({
+      ok: false,
+      error:
+        'tradingPaused cannot be set through PUT /agent/config — it is the kill switch, not a ' +
+        'setting. Use POST /agent/pause or POST /agent/resume so the change is alerted and audited.',
+    });
+    return;
+  }
+
   const next = sanitize({ ...loadAgentConfig(), ...body } as AgentConfigDoc);
 
   // Rule changes are themselves part of the audit trail — you can prove what
@@ -124,7 +140,16 @@ agentRouter.post('/agent/run', async (req, res) => {
       return;
     }
 
-    // Manual — don't auto-execute, create pending for Yes/No with push
+    // This route NEVER places an order. Proposals come back as pending and need an
+    // explicit POST /agent/confirm, and that is deliberate rather than an oversight:
+    // it is the doorway a dashboard button or a curl in a shell history reaches, so
+    // the confirm step is what stands between a stray request and real collateral.
+    //
+    // It does mean the two doorways have different powers — the `somnus_scan` MCP tool
+    // CAN auto-place with `confirm:true`, because there the caller is an operator who
+    // supplied the gateway key and asked for exactly that. Documented in the README
+    // endpoint table so the difference is stated rather than discovered. Do not
+    // "restore parity" here by honouring a body flag without deciding that on purpose.
     opts.requireConfirm = true;
 
     const out = await runCycle(Object.keys(opts).length > 0 ? opts : undefined);
@@ -153,6 +178,9 @@ agentRouter.post('/agent/run', async (req, res) => {
     res.json({
       ok: true,
       dryRun: effectiveDryRun(),
+      // Stated rather than implied: this route cannot place an order, so an empty
+      // `orders` here means "nothing was executed by design", not "nothing qualified".
+      autoExecute: false,
       decisions: out.decisions,
       orders: out.orders,
       books: out.books,

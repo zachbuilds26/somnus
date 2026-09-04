@@ -59,8 +59,15 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  *  trading the operator's wallet — and none of those are registered behind /mcp. The
  *  authority for a per-user tool is the caller's own `x-somnus-token`, which derives
  *  a wallet only they funded; requiring the operator's key on top would make a public
- *  endpoint unusable without publishing the very credential it protects. */
-const KEY_EXEMPT_PATHS = new Set(['/mcp']);
+ *  endpoint unusable without publishing the very credential it protects.
+ *
+ *  `/api/proof/verify` is here for the same reason and no other: it is a POST only
+ *  because it takes a body, it mutates nothing, and README:16 promises that ANYONE can
+ *  audit the chain end-to-end. On the hosted deploy that promise returned 401 — the
+ *  one claim the whole project rests on was the one the middleware blocked. The route
+ *  caps caller-supplied entries so an unauthenticated request cannot spend unbounded
+ *  CPU on signature recovery.                                                  */
+const KEY_EXEMPT_PATHS = new Set(['/mcp', '/api/proof/verify']);
 
 if (config.apiKey) {
   app.use((req, res, next) => {

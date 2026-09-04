@@ -42,6 +42,9 @@ function walk(entries: Entry[], label: string): void {
   let cursor = GENESIS;
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
+    // `noUncheckedIndexedAccess` is on, and it is right to be: `load()` filters torn
+    // lines out, so the array is dense here, but the compiler cannot know that.
+    if (!e) continue;
     const canonical = hashPayload(e.payload);
     const legacy = legacyHashPayload(e.payload);
     const payloadOk = e.payloadHash === canonical || e.payloadHash === legacy;
@@ -75,10 +78,12 @@ for (const f of ['proof-chain.corrupt.jsonl', 'proof-chain.prefix-archive.jsonl'
 let cursor = GENESIS;
 for (let i = 0; i < main.length; i++) {
   const e = main[i];
+  if (!e) continue;
   if (i > 0 && e.prevHash !== cursor) {
     console.log(`\n== context around break (entries ${Math.max(0, i - 2) + 1}..${Math.min(main.length, i + 4)}) ==`);
     for (let j = Math.max(0, i - 2); j < Math.min(main.length, i + 4); j++) {
       const x = main[j];
+      if (!x) continue;
       console.log(`#${j + 1} id=${x.id} kind=${x.kind} ts=${new Date(x.ts).toISOString()} prevHash=${x.prevHash.slice(0, 12)}… payloadHash=${x.payloadHash.slice(0, 12)}… signed=${!!x.signature}`);
     }
     break;

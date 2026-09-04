@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { config, debug, warn } from '../config';
 import { loadAgentConfig } from '../agent-config';
 import { crossingPrice, resolveFill } from './broker';
+import { clockState } from './clock';
 import { horizonPolicy, type TradeablePolicy } from './horizon';
 import { decideFromFair } from './pricing';
 import { dataFresh, riskStatus } from './risk';
@@ -174,6 +175,22 @@ export function userTradingAvailable(): UserTradingAvailability {
         `the operator's kill switch is on${risk.pauseReason ? `: ${risk.pauseReason}` : ''}. ` +
         'A paused deployment adds no new risk of any kind, including yours. Open positions ' +
         'still settle and can still be claimed.',
+    };
+  }
+  // Every window decision here is `secondsLeft` arithmetic against the host clock,
+  // so a skewed clock misprices which windows are still tradable and how much time
+  // remains in them. The agent's own loop already refuses on this; the per-user path
+  // checked `paused` and not the clock, which meant a stranger's stake could be
+  // committed on expiry maths the operator's own trades would have declined.
+  const clock = clockState();
+  if (clock.blocking) {
+    return {
+      ok: false,
+      mode,
+      reason:
+        `this server's clock is ${clock.skewSec ?? '?'}s off chain time, so how long a window ` +
+        'has left cannot be computed reliably — and that number decides both which windows are ' +
+        'tradable and what they are worth. Refusing until the clock is corrected.',
     };
   }
   return { ok: true, mode };

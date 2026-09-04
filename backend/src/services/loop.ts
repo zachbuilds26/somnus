@@ -1,8 +1,8 @@
-import { log, warn } from '../config';
+import { debug, log, warn } from '../config';
 import { effectiveDryRun, loadAgentConfig } from '../agent-config';
 import { isCycleInFlight, runCycle } from './agent';
 import { riskStatus } from './risk';
-import { feedHealthReport, tickFeedHealth } from './sdk';
+import { feedHealthReport, probeFeeds, resetReadExchange, tickFeedHealth } from './sdk';
 import { sweepSettlements } from './settlement';
 import { checkClockSkew } from './clock';
 import { raiseAlert } from './alerts';
@@ -73,6 +73,14 @@ export function loopStatus(): LoopStatus {
  *  left unattended. Time it out, log it, carry on.                            */
 const CYCLE_TIMEOUT_MS = 300_000;
 
+/** How long a transient block may persist before the alert turns critical. A blip
+ *  is a warning; half an hour blind is an incident. */
+const WAIT_ESCALATE_MS = Number(process.env.AGENT_WAIT_ESCALATE_MS ?? 1_800_000);
+
+/** When the current run of transient blocks began, so the alert can say how long
+ *  the agent has actually been unable to trade. */
+let waitingSince: number | undefined;
+
 /** Incremented on every start/stop. A tick that finishes after the loop was
  *  stopped-and-restarted belongs to the old generation and must not schedule:
  *  otherwise its `finally` and the new `startLoop` each arm a timer and the loop
@@ -101,21 +109,56 @@ async function tick(gen: number): Promise<void> {
     // every cycle. Without this the agent keeps waking up, reads a dozen books
     // and logs a rejection per market — burning indexer calls to learn something
     // it already knows, and looking busy while doing nothing.
+    //
+    // But only for conditions a human has to clear. Stopping for a dead book feed
+    // or host clock drift turned a ten-minute indexer blip into an agent that was
+    // off until somebody noticed — and the books really did fail for twenty hours
+    // on 2026-09-02 while every other feed stayed green. Those are waited out
+    // below, with an active attempt to heal, because a scheduler that skips the
+    // cycle also skips the read whose staleness caused the skip.
     const risk = riskStatus();
-    if (!risk.ok) {
-      lastError = risk.blocked.join('; ');
+    if (risk.halting.length > 0) {
+      lastError = risk.halting.join('; ');
       lastSummary = `halted by risk controls: ${lastError}`;
       warn(`loop halted — ${lastError}`);
-      publish('risk', { halted: true, blocked: risk.blocked });
+      publish('risk', { halted: true, blocked: risk.halting });
       raiseAlert({
         level: 'critical',
         key: 'loop-halted',
         title: `agent loop HALTED — ${lastError}`,
-        detail: { blocked: risk.blocked, cycles, lastRunAt },
+        detail: { blocked: risk.halting, cycles, lastRunAt },
       });
       stopLoop();
       return;
     }
+    if (risk.waiting.length > 0) {
+      waitingSince ??= Date.now();
+      const waitedMs = Date.now() - waitingSince;
+      lastError = risk.waiting.join('; ');
+      lastSummary = `waiting ${Math.round(waitedMs / 1000)}s for: ${lastError}`;
+      warn(`loop waiting — ${lastSummary}`);
+      publish('risk', { waiting: risk.waiting, waitedMs });
+      // Escalate once the wait stops looking like a blip. A separate key so the
+      // 15-minute dedupe cannot swallow the louder message.
+      const long = waitedMs > WAIT_ESCALATE_MS;
+      raiseAlert({
+        level: long ? 'critical' : 'warning',
+        key: long ? 'loop-waiting-long' : 'loop-waiting',
+        title: long
+          ? `agent loop has been unable to trade for ${Math.round(waitedMs / 60_000)}m — ${lastError}`
+          : `agent loop waiting on transient conditions — ${lastError}`,
+        detail: { waiting: risk.waiting, waitedMs, cycles },
+      });
+      // Try to heal rather than just re-checking. A dead chain socket does not
+      // recover on its own, and the aggregate feed timer cannot see a book-only
+      // outage because spot and candles keep it looking fresh.
+      if (risk.blocks.some((b) => b.code === 'book-stale')) resetReadExchange();
+      const probe = await probeFeeds();
+      if (!probe.ok) debug('loop: recovery probe still failing:', probe.error);
+      return;
+    }
+    // Cleared — forget the wait so the next one measures from its own start.
+    waitingSince = undefined;
     // Heal a silently-dead price-feed socket before the cycle runs, so a blind
     // agent rebuilds its own feed instead of quietly trading on stale/empty spot.
     tickFeedHealth();
@@ -166,7 +209,12 @@ async function tick(gen: number): Promise<void> {
           const r = await claimAll();
           if (r.claimed.length > 0) log(`auto-claimed ${r.claimed.length} winner(s) ${r.txHash ?? ''}`);
         }
-      } catch {}
+      } catch (err) {
+        // Custody, not correctness: the sweep above already recorded the P&L. Still
+        // say something — a claim that silently never works leaves winnings sitting
+        // as outcome tokens and nothing to explain why.
+        debug('auto-claim failed:', (err as Error).message ?? String(err));
+      }
     })();
 
     // "Do exactly N trades" should finish by itself. Leaving the loop spinning
@@ -232,6 +280,8 @@ export function startLoop(): LoopStatus {
 export function stopLoop(): LoopStatus {
   generation++;
   running = false;
+  // A fresh start should measure its own wait, not inherit the last one's.
+  waitingSince = undefined;
   if (timer) {
     clearTimeout(timer);
     timer = undefined;

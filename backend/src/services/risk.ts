@@ -128,6 +128,39 @@ export interface RiskLimits {
   minEdge: number;
 }
 
+/** Why trading is blocked, as data rather than prose.
+ *
+ *  The distinction that matters is `transient`. Both kinds refuse orders — a blind
+ *  agent must not trade any more than a losing one — but they call for opposite
+ *  responses from the SCHEDULER:
+ *
+ *    - a loss limit, a loss streak, repeated execution failures or the kill switch
+ *      mean a human has to look. Stopping is correct; retrying on a timer is not.
+ *    - a dead order-book feed, host clock drift or a stale settlement sweep are
+ *      infrastructure, and they heal. Stopping the loop for them turns a ten-minute
+ *      indexer blip into an agent that is off until somebody notices — which is
+ *      exactly what a twenty-hour book outage did on 2026-09-02 while every other
+ *      feed stayed green.
+ *
+ *  Codes rather than string matching, so `loop.ts` can act on a condition (rebuild
+ *  the socket for `book-stale`) without parsing the sentence written for humans. */
+export type RiskBlockCode =
+  | 'paused'
+  | 'daily-loss'
+  | 'drawdown'
+  | 'loss-streak'
+  | 'execution-failures'
+  | 'settlement-stale'
+  | 'clock-skew'
+  | 'book-stale';
+
+export interface RiskBlock {
+  code: RiskBlockCode;
+  reason: string;
+  /** True when the condition is expected to clear by itself. */
+  transient: boolean;
+}
+
 export interface RiskStatus {
   /** True when a new order is currently permitted by the breakers. */
   ok: boolean;
@@ -136,6 +169,12 @@ export interface RiskStatus {
   pausedAt?: number;
   /** Human-readable reasons trading is blocked. Empty when ok. */
   blocked: string[];
+  /** The same conditions with their codes, so a caller can act on them. */
+  blocks: RiskBlock[];
+  /** Reasons that mean STOP and wait for a human. */
+  halting: string[];
+  /** Reasons that are expected to clear by themselves — wait, do not stop. */
+  waiting: string[];
   dayUtc: string;
   /** Realised P&L for the current UTC day. Negative = loss. */
   realizedToday: number;
@@ -173,22 +212,32 @@ export function riskStatus(rules: AgentConfigDoc = loadAgentConfig()): RiskStatu
   const clock = clockState();
   const settlementAgeMs =
     state.lastSweepOkTs === undefined ? undefined : Math.max(0, Date.now() - state.lastSweepOkTs);
-  const blocked: string[] = [];
+  const blocks: RiskBlock[] = [];
+  const halt = (code: RiskBlockCode, reason: string): void => {
+    blocks.push({ code, reason, transient: false });
+  };
+  const wait = (code: RiskBlockCode, reason: string): void => {
+    blocks.push({ code, reason, transient: true });
+  };
 
   if (rules.tradingPaused) {
-    blocked.push(`trading paused: ${rules.pauseReason ?? 'no reason recorded'}`);
+    halt('paused', `trading paused: ${rules.pauseReason ?? 'no reason recorded'}`);
   }
   if (rules.maxDailyLoss > 0 && lossToday >= rules.maxDailyLoss) {
-    blocked.push(`daily loss ${lossToday.toFixed(2)} >= limit ${rules.maxDailyLoss}`);
+    halt('daily-loss', `daily loss ${lossToday.toFixed(2)} >= limit ${rules.maxDailyLoss}`);
   }
   if (rules.maxDrawdown > 0 && dd.drawdown >= rules.maxDrawdown) {
-    blocked.push(`drawdown ${dd.drawdown.toFixed(2)} from peak ${dd.peak.toFixed(2)} >= limit ${rules.maxDrawdown}`);
+    halt(
+      'drawdown',
+      `drawdown ${dd.drawdown.toFixed(2)} from peak ${dd.peak.toFixed(2)} >= limit ${rules.maxDrawdown}`,
+    );
   }
   if (rules.maxConsecutiveLosses > 0 && streak >= rules.maxConsecutiveLosses) {
-    blocked.push(`${streak} settled losses in a row >= limit ${rules.maxConsecutiveLosses}`);
+    halt('loss-streak', `${streak} settled losses in a row >= limit ${rules.maxConsecutiveLosses}`);
   }
   if (rules.maxExecutionFailures > 0 && state.executionFailures >= rules.maxExecutionFailures) {
-    blocked.push(
+    halt(
+      'execution-failures',
       `${state.executionFailures} execution failures today >= limit ${rules.maxExecutionFailures}` +
         (state.lastFailureReason ? ` (last: ${state.lastFailureReason})` : ''),
     );
@@ -199,14 +248,19 @@ export function riskStatus(rules: AgentConfigDoc = loadAgentConfig()): RiskStatu
   // limits are reading a number that stopped moving, not a number that is flat.
   // Only enforced while something is actually open: with no exposure there is
   // nothing to realise and a stale sweep is harmless.
+  //
+  // Transient: the loop sweeps at the top of every tick, so this clears itself the
+  // moment the indexer answers again.
   if (rules.maxSettlementAgeMs > 0 && open > 0) {
     if (settlementAgeMs === undefined) {
-      blocked.push(
+      wait(
+        'settlement-stale',
         'no settlement sweep has succeeded yet, so open positions cannot be graded — ' +
           'refusing to add risk on unverifiable P&L',
       );
     } else if (settlementAgeMs > rules.maxSettlementAgeMs) {
-      blocked.push(
+      wait(
+        'settlement-stale',
         `last settlement sweep ${Math.round(settlementAgeMs / 60_000)}m ago > limit ` +
           `${Math.round(rules.maxSettlementAgeMs / 60_000)}m — loss breakers are reading stale P&L` +
           (state.lastSweepError ? ` (last error: ${state.lastSweepError})` : ''),
@@ -214,9 +268,11 @@ export function riskStatus(rules: AgentConfigDoc = loadAgentConfig()): RiskStatu
     }
   }
 
-  // Expiry arithmetic is only as good as the clock behind it.
+  // Expiry arithmetic is only as good as the clock behind it. Transient: an NTP
+  // correction fixes it without anyone touching the agent.
   if (clock.blocking && clock.skewSec !== undefined) {
-    blocked.push(
+    wait(
+      'clock-skew',
       `host clock is ${clock.skewSec}s off chain time — window expiry decisions are unsafe`,
     );
   }
@@ -236,22 +292,27 @@ export function riskStatus(rules: AgentConfigDoc = loadAgentConfig()): RiskStatu
       // Never succeeded. At boot that is simply "not yet", so only block once the
       // process has been up long enough to have tried.
       if (Date.now() - PROCESS_STARTED_AT > BOOK_STALE_BLOCK_MS) {
-        blocked.push('no order book has ever been read successfully — the agent is blind');
+        wait('book-stale', 'no order book has ever been read successfully — the agent is blind');
       }
     } else if (bookAge > BOOK_STALE_BLOCK_MS) {
-      blocked.push(
+      wait(
+        'book-stale',
         `no order book read in ${Math.round(bookAge / 60_000)}m — the agent is blind ` +
           '(every decision is derived from the book, so nothing can be priced)',
       );
     }
   }
 
+  const blocked = blocks.map((b) => b.reason);
   return {
-    ok: blocked.length === 0,
+    ok: blocks.length === 0,
     paused: rules.tradingPaused,
     pauseReason: rules.pauseReason,
     pausedAt: rules.pausedAt,
     blocked,
+    blocks,
+    halting: blocks.filter((b) => !b.transient).map((b) => b.reason),
+    waiting: blocks.filter((b) => b.transient).map((b) => b.reason),
     dayUtc: utcDayKey(),
     realizedToday,
     lossToday,
@@ -392,12 +453,19 @@ export function clearExecutionFailures(force = false): void {
 
 /** Trip the loss breakers if the freshly-settled ledger now crosses a limit.
  *  Called after settlement, so a bad session stops the agent at the moment the
- *  loss becomes real rather than on the next cycle's first order. */
+ *  loss becomes real rather than on the next cycle's first order.
+ *
+ *  Only HALTING conditions set the kill switch. This used to pause on anything that
+ *  blocked, which meant a ten-minute indexer outage — a stale sweep, a dead book
+ *  feed — latched the persistent switch and required a manual resume to clear
+ *  something that had already fixed itself. A transient condition still refuses
+ *  orders through `riskStatus`; it just does not get to leave a note that outlives
+ *  the problem. */
 export function reviewAfterSettlement(): RiskStatus {
   const rules = loadAgentConfig();
   const status = riskStatus(rules);
-  if (status.ok || status.paused) return status;
-  return pauseTrading(status.blocked.join('; '));
+  if (status.paused || status.halting.length === 0) return status;
+  return pauseTrading(status.halting.join('; '));
 }
 
 /** Is the market data behind a decision fresh enough to act on?

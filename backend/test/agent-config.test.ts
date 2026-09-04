@@ -61,6 +61,19 @@ describe('agent-config.sanitize', () => {
     assert.ok(sanitize({ ...base(), intervalMs: 1 }).intervalMs >= 5000);
   });
 
+  // REGRESSION: `claimEnabled` was the one field read as `Boolean(doc?.claimEnabled)`
+  // while every other fell back to its default. So a partial document — anything that
+  // did not spread the current config first — silently switched off auto-claim, and
+  // winnings sat unredeemed as outcome tokens with nothing to explain why.
+  it('defaults claimEnabled on rather than off when it is absent', () => {
+    const partial = { maxTradeSize: 5 } as unknown as AgentConfigDoc;
+    assert.equal(sanitize(partial).claimEnabled, true);
+  });
+
+  it('still honours claimEnabled when it is explicitly false', () => {
+    assert.equal(sanitize({ ...base(), claimEnabled: false }).claimEnabled, false);
+  });
+
   // REGRESSION: a PUT of `[1,2,3]` once persisted keys "0","1","2" into the
   // config file and the proof chain, because sanitize spread caller input.
   it('strips unknown keys instead of persisting them', () => {

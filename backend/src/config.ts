@@ -134,7 +134,23 @@ function safeJson(v: unknown): string {
   }
 }
 
-export const ACTIVE_KEY = config.privateKey ?? config.tradeKey ?? config.operatorKey;
+/** The ONE answer to "which key does this process act with".
+ *
+ *  There used to be two. `sdk.ts` signed orders with `TRADE_KEY ?? PRIVATE_KEY ??
+ *  OPERATOR_KEY`, while the proof signer and the on-chain anchor both preferred
+ *  `PRIVATE_KEY` first — so an operator who set both (which .env.example actively
+ *  suggests, as "session-key mode") would have had the audit chain signed by one
+ *  wallet and the trades placed by another. `somnus_proof_verify` would still pass,
+ *  because it checks signatures against whichever signer it resolved, so nothing
+ *  would ever have reported the split.
+ *
+ *  TRADE_KEY wins because it is the wallet that holds the money and places the
+ *  orders: an audit trail signed by anything else is signed by a bystander.     */
+export function activeKey(): `0x${string}` | undefined {
+  const key = config.tradeKey ?? config.privateKey ?? config.operatorKey;
+  if (!key) return undefined;
+  return (key.startsWith('0x') ? key : `0x${key}`) as `0x${string}`;
+}
 
 /** Stamped onto every live fill and order log.
  *

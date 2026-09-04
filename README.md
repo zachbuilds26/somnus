@@ -13,7 +13,7 @@ Built for the **Somnia × DreamDEX Event Contracts Hackathon**. Testnet-first.
 1. **Watches live markets** — pulls Event Contract windows (Up/Down) and order books from DreamDEX via the Somnia Markets SDK
 2. **Thinks for itself** — computes a fair probability using driftless GBM with horizon-matched volatility (not naive sqrt-scaling), compares it to the book, and only acts when there's genuine edge
 3. **Respects your limits** — max trade size, max open positions, max open exposure, min edge, daily loss cap, loss streak, execution failures, data freshness — all enforced server-side, not in the UI
-4. **Leaves a paper trail** — every decision, order, claim, and config change goes into a hash-chained, optionally signed JSONL log. `POST /proof/verify` lets anyone audit the chain end-to-end.
+4. **Leaves a paper trail** — every decision, order, claim, and config change goes into a hash-chained, optionally signed JSONL log. `POST /proof/verify` lets anyone audit the chain end-to-end, and means it: the route is exempt from the gateway key, since a public audit that needs the operator's secret is not one. Caller-supplied slices are capped at 5,000 entries per request, because each entry costs a signature recovery.
 5. **Runs autonomously** — start the loop and it runs non-overlapping cycles on your interval. Or call `POST /agent/run` for a one-off.
 
 ---
@@ -65,9 +65,10 @@ Tests run offline — no RPC, no indexer, no keys. They use a temp data dir and 
 | GET | `/metrics` | Prometheus text format — every gauge above, sampled over time |
 | GET | `/markets` | DreamDEX spot markets |
 | GET | `/markets/binary` | Live Event Contract windows (Up/Down) |
-| GET | `/markets/:symbol/book` | Top of book for a YES outcome |
-| GET/PUT | `/agent/config` | Read or update the rules the bot *actually enforces* |
-| POST | `/agent/run` | Run one decision cycle (dry-run by default) |
+| GET | `/markets/book?symbol=` | Top of book for a YES outcome. Use this form — Event Contract symbols contain `/` and `#`, so the path form below needs `%2F`/`%23` |
+| GET | `/markets/:symbol/book` | Same, path form. The symbol **must** be percent-encoded (`BTC-…-1538%2FtUSDC%23YES`) or the `/` splits the path and it 404s |
+| GET/PUT | `/agent/config` | Read or update the rules the bot *actually enforces*. `tradingPaused` is rejected here — use `/agent/pause` and `/agent/resume`, which alert and audit |
+| POST | `/agent/run` | Run one decision cycle. Always returns proposals as **pending** for confirmation and never places an order itself — to auto-execute, use the `somnus_scan` MCP tool with `confirm:true`, or run the loop |
 | GET | `/agent/logs` | Recent decisions + orders — filter by `kind`, `since`, `until`, `cursor` |
 | GET | `/agent/stream` | SSE feed of decisions, orders, cycles, settlements, breaker trips |
 | GET/POST | `/agent/loop` | Inspect / start / stop the autonomous loop |

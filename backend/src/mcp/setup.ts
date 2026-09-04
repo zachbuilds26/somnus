@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { config, warn } from '../config';
+import { activeKey, config, warn } from '../config';
 import { closeExchanges, getTradingExchange, nativeGasBalance } from '../services/sdk';
 import { walletSnapshot, __resetWalletCacheForTests } from '../services/wallet';
 
@@ -52,11 +52,9 @@ export interface WalletCreation {
  *  orphan its balance and its open positions with no way back, so an existing
  *  `TRADE_KEY` always wins and the caller is told the wallet already exists. */
 export function createLocalWallet(): WalletCreation {
-  const existing = config.tradeKey ?? config.privateKey ?? config.operatorKey;
+  const existing = activeKey();
   if (existing) {
-    const address = privateKeyToAccount(
-      (existing.startsWith('0x') ? existing : `0x${existing}`) as `0x${string}`,
-    ).address;
+    const address = privateKeyToAccount(existing).address;
     return {
       created: false,
       address,
@@ -120,11 +118,20 @@ export async function fundCollateral(): Promise<FundResult> {
 
   __resetWalletCacheForTests();
   const before = await walletSnapshot(true);
-  const address = privateKeyToAccount(
-    ((config.tradeKey ?? config.privateKey ?? config.operatorKey) as string).startsWith('0x')
-      ? ((config.tradeKey ?? config.privateKey ?? config.operatorKey) as `0x${string}`)
-      : (`0x${config.tradeKey ?? config.privateKey ?? config.operatorKey}` as `0x${string}`),
-  ).address;
+  // No key means nothing to fund. This used to cast straight through `as string`
+  // and blow up inside viem on `.startsWith` of undefined; say what is wrong instead.
+  const key = activeKey();
+  if (!key) {
+    return {
+      address: '',
+      funded: false,
+      needsGas: false,
+      message:
+        'No wallet is configured, so there is nothing to fund. Run somnus_setup first to create ' +
+        'one (it writes TRADE_KEY to backend/.env and never returns the key over this channel).',
+    };
+  }
+  const address = privateKeyToAccount(key).address;
 
   const gas = before.native ?? Number(await nativeGasBalance()) / 1e18;
   if (!(gas >= MIN_GAS_TO_PROCEED)) {

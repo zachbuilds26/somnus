@@ -1,6 +1,6 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import { verifyMessage } from 'viem';
-import { config } from '../config';
+import { activeKey } from '../config';
 
 export interface Signer {
   readonly address: string | undefined;
@@ -28,7 +28,7 @@ export function createProofSigner(privateKey: string | undefined): Signer | unde
 }
 
 export function createConfiguredSigner(): Signer | undefined {
-  return createProofSigner(config.privateKey ?? config.tradeKey ?? config.operatorKey);
+  return createProofSigner(activeKey());
 }
 
 /** Verify one entry's signature against an expected signer address.

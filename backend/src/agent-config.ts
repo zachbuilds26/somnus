@@ -154,7 +154,11 @@ export function sanitize(doc: AgentConfigDoc): AgentConfigDoc {
       ? doc.symbols.map((s) => String(s).trim().toUpperCase()).filter(Boolean)
       : d.symbols,
     mode: doc?.mode === 'live' || doc?.mode === 'view' ? doc.mode : 'dry-run',
-    claimEnabled: Boolean(doc?.claimEnabled),
+    // `??`, not `Boolean(...)`. Every other field falls back to its default on a
+    // partial write; this one alone read absent-as-false, so the first caller that
+    // PUT a subset without spreading the current config would silently switch off
+    // auto-claim and leave winnings sitting as unredeemed outcome tokens.
+    claimEnabled: doc?.claimEnabled ?? d.claimEnabled,
   };
 }
 
