@@ -31,7 +31,7 @@ export function registerWriteTools(server: McpServer): void {
       'configured, then fund its collateral from the testnet faucet. The key is written ' +
       'to backend/.env and never returned over this channel. Gas is the one step that ' +
       'cannot be automated — the SDK has no faucet for the gas token — so this reports ' +
-      'the address to fund when the wallet is empty.',
+      'the address to fund AND where to claim free testnet STT for it.',
     async () => {
       const wallet = createLocalWallet();
       if (wallet.created) {
@@ -41,9 +41,8 @@ export function registerWriteTools(server: McpServer): void {
             '',
             wallet.note,
             '',
-            'Next: send a small amount of the native gas token to that address (Somnia\'s public',
-            'testnet faucet, or any funded wallet), restart Somnus, then run somnus_setup again to',
-            'draw trading collateral. Dry-run stays on until you explicitly switch to live.',
+            'Once it has gas, restart Somnus and run somnus_setup again to draw trading',
+            'collateral. Dry-run stays on until you explicitly switch to live.',
           ].join('\n'),
         );
       }

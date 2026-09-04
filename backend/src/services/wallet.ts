@@ -1,5 +1,6 @@
 import { debug, warn } from '../config';
-import { getTradingExchange, nativeGasBalance } from './sdk';
+import { getSignerAddress, getTradingExchange, nativeGasBalance } from './sdk';
+import { gasFaucetHelp } from '../faucets';
 
 /** What the wallet can actually afford.
  *
@@ -191,7 +192,15 @@ export async function canAfford(cost: number): Promise<AffordabilityCheck> {
   if (w.native !== undefined && w.native < MIN_GAS_NATIVE) {
     return {
       ok: false,
-      reason: `native gas too low (${w.native.toFixed(4)} ${gasCode}) — fund the trade key before trading`,
+      // Names the target and where to get it. This reason reaches /health, the alert
+      // webhook and the audit chain, so an operator woken by "gas too low" should not
+      // then have to go and find out how much and from where.
+      reason:
+        `native gas too low (${w.native.toFixed(4)} ${gasCode}, needs ${MIN_GAS_NATIVE}) — ` +
+        'fund the trade key before trading' +
+        (gasFaucetHelp(getSignerAddress(), MIN_GAS_NATIVE, w.nativeCode)
+          ? `.\n\n${gasFaucetHelp(getSignerAddress(), MIN_GAS_NATIVE, w.nativeCode)}`
+          : ''),
       collateral: w.collateral,
     };
   }

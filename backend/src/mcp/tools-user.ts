@@ -14,6 +14,7 @@ import {
   userWalletSnapshot,
 } from '../services/user-trading';
 import { ok, guard, reporter } from './shared';
+import { gasFaucetHelp, gasFaucetLinks } from '../faucets';
 import type { UserIdentity } from './identity';
 
 /** PER-USER tools — the caller's own wallet, on the hosted endpoint.
@@ -71,6 +72,12 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
           minEdgeFloor: userMinEdgeFloor(),
           tradesPerHour: userTradesPerHour(),
           nextStep: nextStep(snapshot.gas, snapshot.collateral),
+          // Structured, so a UI can render its own buttons instead of parsing prose.
+          // Only when gas is the thing missing — links to free money are noise on a
+          // funded wallet, and absent entirely off testnet.
+          ...(snapshot.gas === undefined || snapshot.gas < minUserGas()
+            ? { gasFaucets: gasFaucetLinks() }
+            : {}),
           custody:
             'This wallet is derived from your token by the server, so the server can derive its key ' +
             'too — it is custodial. Testnet only, faucet funds only, nothing you would miss.',
@@ -223,15 +230,21 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
   );
 }
 
-/** The one sentence a caller most needs after asking about their wallet. */
+/** The one sentence a caller most needs after asking about their wallet.
+ *
+ *  With the faucet links attached when gas is what is missing, because this tool is
+ *  usually the FIRST thing anyone calls — `somnus_my_wallet` prints the address, and
+ *  the very next thing they need is somewhere to get gas for it. Sending them away to
+ *  search for a Somnia faucet is the step that used to lose people. */
 function nextStep(gas: number | undefined, collateral: number | undefined): string {
   if (gas === undefined || gas < minUserGas()) {
     return (
-      `Send about ${minUserGas()} of the native gas token to this address (Somnia's public testnet ` +
-      'faucet, or any funded wallet). A trade only burns ~0.004 of it, but the venue reserves the ' +
-      'worst-case fee against your balance before it will accept any transaction — and no faucet in ' +
-      'the SDK mints gas, so this is the one step that cannot be automated.'
-    );
+      `Send about ${minUserGas()} of the native gas token to this address. A trade only burns ` +
+      '~0.004 of it, but the venue reserves the worst-case fee against your balance before it ' +
+      'will accept any transaction — and no faucet in the SDK mints gas, so this is the one step ' +
+      'that cannot be automated.' +
+      `\n\n${gasFaucetHelp(undefined, minUserGas()) ?? ''}`
+    ).trimEnd();
   }
   if (collateral === undefined || collateral <= 0) {
     return 'Run somnus_my_fund to draw testnet tUSDC collateral, then somnus_my_quote.';

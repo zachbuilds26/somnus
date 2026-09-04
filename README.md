@@ -131,7 +131,19 @@ Six more tools appear, and they act on a wallet that is **yours**. The server de
 
 Then say: *"set up my somnus wallet"*
 
-`somnus_my_wallet` prints the address. Send it about **0.7 STT** of testnet gas from Somnia's public faucet, then `somnus_my_fund` draws your own tUSDC — the SDK's faucet mints **collateral only**, and minting is itself a transaction, so gas is the one step nobody can automate for you. After that: *"what would you trade for me with $5?"* (`somnus_my_quote`) and *"do it"* (`somnus_my_trade`).
+`somnus_my_wallet` prints the address. Send it about **0.7 STT** of testnet gas, then `somnus_my_fund` draws your own tUSDC — the SDK's faucet mints **collateral only**, and minting is itself a transaction, so gas is the one step nobody can automate for you. After that: *"what would you trade for me with $5?"* (`somnus_my_quote`) and *"do it"* (`somnus_my_trade`).
+
+Every tool that finds your wallet short on gas prints these itself, with your address already filled in — you should never have to come back here for them:
+
+| Faucet | Why this one |
+| --- | --- |
+| [Google Cloud Web3](https://cloud.google.com/application/web3/faucet/somnia/shannon) | Try first — run by Google Cloud, sends STT straight to any EVM address |
+| [thirdweb Somnia Shannon](https://thirdweb.com/somnia-shannon-testnet) | Ecosystem partner, claims through the Shannon network page |
+| [Stakely](https://stakely.io/faucet/somnia-testnet-stt) | No sign-in and no Google account — just a captcha |
+
+Need more than a faucet hands out (stress testing)? Ask in `#dev-chat` on the [Somnia Discord](https://discord.com/invite/somnia) and tag DevRel `@emreyeth`.
+
+STT pays **gas only**. It is not the tUSDC you trade with, and the two are never interchangeable — having 10,000 tUSDC and no STT still means you cannot trade.
 
 Why 0.7 when a trade only burns about 0.004: the venue builds transactions with a 10,000,000 gas limit at 60 gwei, and the node checks that **worst case** against your balance before it will accept one. A wallet holding less passes every local check and then dies at the node with `insufficient balance`, so the tools refuse early and name the real number instead.
 

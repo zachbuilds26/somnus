@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { activeKey, config, warn } from '../config';
+import { gasFaucetHelp, gasFaucetLinks, type Faucet } from '../faucets';
 import { closeExchanges, getTradingExchange, nativeGasBalance } from '../services/sdk';
 import { walletSnapshot, __resetWalletCacheForTests } from '../services/wallet';
 
@@ -39,11 +40,21 @@ const ENV_PATH =
  *  the check exists to catch "zero" rather than to demand a big balance. */
 const MIN_GAS_TO_PROCEED = 0.01;
 
+/** What to actually TELL somebody to claim, which is not the same number.
+ *
+ *  `MIN_GAS_TO_PROCEED` is the floor for attempting the collateral mint — it catches
+ *  "zero". But the venue reserves a worst-case fee of roughly 0.6 against the balance
+ *  before it accepts a trade, so a wallet funded to 0.01 mints collateral and then
+ *  cannot trade. Advising the trading number avoids a second trip to the faucet. */
+const MIN_GAS_TO_PROCEED_HINT = 0.7;
+
 export interface WalletCreation {
   created: boolean;
   address: string;
   envPath: string;
   note: string;
+  /** Where to claim gas, as data — present on testnet only. */
+  faucets?: Faucet[];
 }
 
 /** Create a wallet and persist it, or report the one already configured.
@@ -78,13 +89,21 @@ export function createLocalWallet(): WalletCreation {
   );
   // The process read its config at import time, so the new key is not live until a
   // restart. Say so plainly instead of letting the next tool call fail confusingly.
+  //
+  // The faucet links go here, on the FIRST-RUN path, because this is the moment a
+  // brand-new wallet has nothing: zero gas, zero collateral, and no way to get either
+  // without visiting a faucet. Telling somebody at the next failed call is a round trip
+  // they did not need.
+  const faucets = gasFaucetHelp(address, MIN_GAS_TO_PROCEED_HINT);
   return {
     created: true,
     address,
     envPath: ENV_PATH,
     note:
       `Key written to ${ENV_PATH} and never returned over this channel — an MCP result is ` +
-      'conversation content and gets stored. Restart Somnus for the new key to take effect.',
+      'conversation content and gets stored. Restart Somnus for the new key to take effect.\n\n' +
+      `This wallet is brand new, so it holds nothing at all. Next step is gas.\n\n${faucets ?? ''}`.trimEnd(),
+    ...(faucets ? { faucets: gasFaucetLinks()?.faucets } : {}),
   };
 }
 
@@ -99,6 +118,8 @@ export interface FundResult {
   funded: boolean;
   needsGas: boolean;
   message: string;
+  /** Where to claim gas, as data — present only when gas is what is missing. */
+  faucets?: Faucet[];
 }
 
 /** Mint trading collateral to the configured wallet.
@@ -144,8 +165,10 @@ export async function fundCollateral(): Promise<FundResult> {
       message:
         `This wallet holds ${gas.toFixed(6)} ${before.nativeCode ?? 'native token'} and needs gas before it ` +
         'can do anything. The SDK has no faucet for the gas token — only for collateral — and minting ' +
-        `collateral is itself a transaction. Send a small amount of ${before.nativeCode ?? 'the native token'} ` +
-        `to ${address} from Somnia's public testnet faucet (or any funded wallet), then run somnus_setup again.`,
+        'collateral is itself a transaction, so this is the one step that cannot be automated for you.' +
+        `\n\n${gasFaucetHelp(address, MIN_GAS_TO_PROCEED_HINT, before.nativeCode) ?? ''}` +
+        '\n\nThen run somnus_setup again.',
+      ...(gasFaucetLinks() ? { faucets: gasFaucetLinks()?.faucets } : {}),
     };
   }
 

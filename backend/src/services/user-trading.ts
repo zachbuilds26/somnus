@@ -20,6 +20,7 @@ import { buildSignalContext, estimateFair, type SignalContext } from './signal';
 import { findClaimable, heldPositions, type ClaimableRow } from './settlement';
 import { appendEntry } from './store';
 import { gasCostFromReceipt, pickCollateral } from './wallet';
+import { gasFaucetHelp, gasFaucetLinks, type Faucet } from '../faucets';
 import type { UserIdentity } from '../mcp/identity';
 import type { Report } from '../types';
 
@@ -341,6 +342,8 @@ export interface UserFunding {
   gasCode?: string;
   txHash?: string;
   message: string;
+  /** Where to claim gas, as data — present only when gas is what is missing. */
+  faucets?: Faucet[];
 }
 
 /** Draw trading collateral into a derived wallet from the SDK faucet.
@@ -372,9 +375,17 @@ export async function fundUserWallet(
       funded: false,
       needsGas: true,
       gasCode: before.gasCode,
+      // The faucet links belong here too, even though the balance is UNKNOWN rather
+      // than known-low. An unfunded wallet and an unreadable one are indistinguishable
+      // from this side, and for a brand-new wallet the unreadable branch is the likelier
+      // one to hit — so "try again in a moment" on its own is a dead end for exactly the
+      // person who most needs to be told where a faucet is.
       message:
         'could not read this wallet\'s gas balance, and minting collateral is itself a transaction ' +
-        `that needs gas. Try again in a moment. ${before.error ?? before.unconfirmed ?? ''}`.trim(),
+        `that needs gas. ${before.error ?? before.unconfirmed ?? ''}`.trim() +
+        '\n\nIf this wallet is new it has no gas yet, which is the likeliest explanation.' +
+        `\n\n${gasFaucetHelp(identity.address, minUserGas(), before.gasCode) ?? ''}`,
+      ...(gasFaucetLinks() ? { faucets: gasFaucetLinks()?.faucets } : {}),
     };
   }
   if (!(gas >= minUserGas())) {
@@ -391,9 +402,10 @@ export async function fundUserWallet(
         `${minUserGas()} before it can transact. The SDK faucet mints collateral only, and minting ` +
         'is itself a transaction — and the venue reserves the worst-case fee (a 10M gas limit at ' +
         '60 gwei, about 0.6) against your balance before it will accept one, even though a trade ' +
-        `actually burns about 0.004. Send ${minUserGas()} ${before.gasCode ?? 'STT'} to ` +
-        `${identity.address} from Somnia's public testnet faucet (or any funded wallet), then call ` +
-        'this again.',
+        'actually burns about 0.004.' +
+        `\n\n${gasFaucetHelp(identity.address, minUserGas(), before.gasCode) ?? ''}` +
+        '\n\nThen call somnus_my_fund again.',
+      ...(gasFaucetLinks() ? { faucets: gasFaucetLinks()?.faucets } : {}),
     };
   }
 
@@ -833,6 +845,9 @@ export interface UserTradeResult {
   cap?: number;
   stakeClamped?: boolean;
   reason: string;
+  /** Where to claim gas, as data — present only when a low gas balance is the reason
+   *  nothing was sent. */
+  faucets?: Faucet[];
 }
 
 /** Price a trade for a caller and, once confirmed, send it from their own wallet.
@@ -994,7 +1009,12 @@ async function executeUserTrade(
       cap,
       reason:
         'could not read this wallet\'s gas balance, so the order was not sent — an order that ' +
-        `cannot pay gas reverts and costs the attempt. ${wallet.error ?? wallet.unconfirmed ?? ''}`.trim(),
+        `cannot pay gas reverts and costs the attempt. ${wallet.error ?? wallet.unconfirmed ?? ''}`.trim() +
+        // Same reasoning as the funder: unfunded and unreadable look identical from here,
+        // and a new wallet hits this branch, so the guidance travels with it.
+        '\n\nIf this wallet is new it has no gas yet, which is the likeliest explanation.' +
+        `\n\n${gasFaucetHelp(identity.address, minUserGas(), wallet.gasCode) ?? ''}`,
+      ...(gasFaucetLinks() ? { faucets: gasFaucetLinks()?.faucets } : {}),
     };
   }
   if (wallet.gas < minUserGas()) {
@@ -1008,8 +1028,10 @@ async function executeUserTrade(
         `this wallet holds ${wallet.gas.toFixed(4)} ${wallet.gasCode ?? 'native token'} and needs about ` +
         `${minUserGas()} to transact. The trade itself burns roughly 0.004, but the venue reserves the ` +
         'worst-case fee (a 10M gas limit at 60 gwei) against your balance before it will accept the ' +
-        `transaction at all. Send ${minUserGas()} ${wallet.gasCode ?? 'STT'} to ${identity.address} ` +
-        "from Somnia's public testnet faucet, then trade.",
+        'transaction at all.' +
+        `\n\n${gasFaucetHelp(identity.address, minUserGas(), wallet.gasCode) ?? ''}` +
+        '\n\nThen trade — nothing was sent and nothing was spent.',
+      ...(gasFaucetLinks() ? { faucets: gasFaucetLinks()?.faucets } : {}),
     };
   }
   if (wallet.collateral === undefined) {
