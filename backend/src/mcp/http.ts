@@ -28,8 +28,16 @@ import { userTradingMode } from '../services/user-trading';
  *
  *  Stateless on purpose (`sessionIdGenerator: undefined`): each request carries its
  *  own transport, so there is no server-side session map to grow without bound, and
- *  a restart cannot orphan a client mid-conversation. The cost is no server-initiated
- *  notifications, which this surface does not need.                              */
+ *  a restart cannot orphan a client mid-conversation.
+ *
+ *  What that costs is the STANDALONE push stream — the one a client would open with
+ *  `GET /mcp` — which is why the GET below answers 405. It does NOT cost per-request
+ *  notifications, and the distinction matters: `extra.sendNotification` inside a tool
+ *  is tagged with that call's `relatedRequestId`, so the transport routes it down the
+ *  POST's own SSE stream. That is what carries progress out of a slow tool (see
+ *  `reporter` in mcp/shared.ts). An earlier version of this comment said notifications
+ *  were simply unavailable here, which was wrong and would have talked the next reader
+ *  out of the fix.                                                               */
 
 /** What a caller sees when they use a per-user tool with no token. It is the whole
  *  onboarding path, so it says how to set the header rather than just what is wrong. */

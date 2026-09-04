@@ -13,7 +13,7 @@ import {
   userTradesPerHour,
   userWalletSnapshot,
 } from '../services/user-trading';
-import { ok, guard } from './shared';
+import { ok, guard, reporter } from './shared';
 import type { UserIdentity } from './identity';
 
 /** PER-USER tools — the caller's own wallet, on the hosted endpoint.
@@ -89,10 +89,10 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
         'transaction, so the wallet needs a little native gas first.',
       inputSchema: {},
     },
-    () =>
+    (_args, extra) =>
       guard(async () => {
         const identity = resolve();
-        return ok(await fundUserWallet(identity));
+        return ok(await fundUserWallet(identity, reporter(extra)));
       }),
   );
 
@@ -128,7 +128,7 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
         symbols: z.array(z.string()).optional().describe('Assets to consider, e.g. ["BTC","ETH"]'),
       },
     },
-    (args) =>
+    (args, extra) =>
       guard(async () => {
         resolve();
         return ok(
@@ -136,6 +136,7 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
             ...(args.stake !== undefined ? { stake: args.stake } : {}),
             ...(args.minEdge !== undefined ? { minEdge: args.minEdge } : {}),
             ...(args.symbols !== undefined ? { symbols: args.symbols } : {}),
+            onProgress: reporter(extra),
           }),
         );
       }),
@@ -169,7 +170,7 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
         confirm: z.boolean().optional().describe('true = actually send it. Nothing is sent without this.'),
       },
     },
-    (args) =>
+    (args, extra) =>
       guard(async () => {
         const identity = resolve();
         return ok(
@@ -179,6 +180,7 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
             ...(args.minEdge !== undefined ? { minEdge: args.minEdge } : {}),
             ...(args.symbols !== undefined ? { symbols: args.symbols } : {}),
             confirm: args.confirm === true,
+            onProgress: reporter(extra),
           }),
         );
       }),
@@ -213,10 +215,10 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
         confirm: z.boolean().optional().describe('true = actually redeem. Nothing is sent without this.'),
       },
     },
-    (args) =>
+    (args, extra) =>
       guard(async () => {
         const identity = resolve();
-        return ok(await claimUserPositions(identity, args.confirm === true));
+        return ok(await claimUserPositions(identity, args.confirm === true, reporter(extra)));
       }),
   );
 }

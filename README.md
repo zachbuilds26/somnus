@@ -107,6 +107,19 @@ Twelve read-only tools. No credential, nothing to spend, nothing to steal — no
 
 That last one runs `somnus_proof_verify` — linkage, head match, and every signature, checked independently, with unsigned historical entries reported rather than hidden.
 
+**The slow tools narrate themselves.** Pricing eight windows means eight order-book reads and takes the better part of a minute; verifying the chain is one ECDSA recovery per entry across thousands. That used to be dead silence followed by an abrupt answer, which reads as a hung tool. These now emit MCP `notifications/progress` as they work:
+
+```
++0ms     finding tradeable windows
++2527ms  reading spot and candles for 2 asset(s)
++5289ms  [0/8] pricing 5m BTC (1 of 8)
++5469ms  [1/8] pricing 5m ETH (2 of 8)
+...
++6777ms  result
+```
+
+This is deliberately **server-side, not a client setting**. Progress is part of the MCP protocol, so any client that renders it gets this — Claude Code, Cursor, Cline, your own script — with nothing to configure. It is also strictly additive: a client that sends no `progressToken` gets no notifications and a byte-identical result, because the spec forbids volunteering progress nobody asked for. Reporting is fire-and-forget, so a client that hangs up mid-call can never turn a placed trade into a failed tool.
+
 ### Your-wallet mode — hosted, your own token, ~1 minute
 
 ```bash

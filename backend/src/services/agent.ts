@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { debug, warn } from '../config';
 import { effectiveDryRun, loadAgentConfig } from '../agent-config';
-import type { AgentConfigDoc } from '../types';
+import type { AgentConfigDoc, Report } from '../types';
 import { eventBook, listEventMarketRows } from './sdk';
 import { buildSignalContext, estimateFair } from './signal';
 import { decideFromFair, momentumBreak } from './pricing';
@@ -61,6 +61,10 @@ export interface RunOpts {
   /** When true, found trades become pending asks instead of auto-executing. */
   requireConfirm?: boolean;
   edgePreset?: 'very-sure' | 'middle' | 'a-bit-sure';
+  /** Narrates the cycle as it walks the shortlist — one book read per window, so this
+   *  is the slow loop a caller is waiting through. Best-effort; see `Report` in
+   *  types.ts. Absent by default, and absent changes nothing. */
+  onProgress?: Report;
 }
 
 export function runCycle(opts?: RunOpts): Promise<CycleResult> {
@@ -90,6 +94,7 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
   const books: BookTicker[] = [];
   const errors: string[] = [];
   const pending: PendingTrade[] = [];
+  const report: Report = opts?.onProgress ?? (() => undefined);
 
   // The operator's saved rules govern this cycle — same document the broker
   // gates on and the UI edits. A per-run override (from the coding-agent tool or
@@ -188,7 +193,14 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
     errors.push('price feed returned no spot — falling back to consensus (agent will not trade)');
   }
 
+  let scanned = 0;
   for (const { market: mk, policy } of subset) {
+    report(
+      `pricing ${policy.label} ${mk.asset} (${scanned + 1} of ${subset.length})`,
+      scanned,
+      subset.length,
+    );
+    scanned += 1;
     try {
       const book = await eventBook(mk.symbol, 5);
       books.push(book);

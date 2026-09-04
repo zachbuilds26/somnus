@@ -9,7 +9,7 @@ import { pauseTrading, resumeTrading, reviewAfterSettlement } from '../services/
 import { claimAll, sweepSettlements } from '../services/settlement';
 import { appendEntry } from '../services/store';
 import { createLocalWallet, fundCollateral } from './setup';
-import { ok, say, simpleTool, guard } from './shared';
+import { ok, say, simpleTool, guard, reporter } from './shared';
 import type { AgentConfigDoc } from '../types';
 
 /** WRITE tools — everything that can move money or change a limit.
@@ -68,7 +68,7 @@ export function registerWriteTools(server: McpServer): void {
         confirm: z.boolean().optional().describe('true = place immediately, skipping the pending step'),
       },
     },
-    (args) =>
+    (args, extra) =>
       guard(async () => {
         const out = await runCycle({
           ...(args.maxTradeSize !== undefined ? { maxTradeSize: args.maxTradeSize } : {}),
@@ -76,6 +76,7 @@ export function registerWriteTools(server: McpServer): void {
           ...(args.minEdge !== undefined ? { minEdge: args.minEdge } : {}),
           ...(args.symbols !== undefined ? { symbols: args.symbols } : {}),
           requireConfirm: args.confirm !== true,
+          onProgress: reporter(extra),
         });
         return ok({
           dryRun: effectiveDryRun(),
@@ -261,8 +262,10 @@ export function registerWriteTools(server: McpServer): void {
     'Realise the outcome of settled positions without redeeming them. This is what keeps ' +
       'the loss limits honest: settlement determines P&L, redemption only moves the ' +
       'collateral back, and the breakers read the ledger this writes.',
-    async () => {
+    async (report) => {
+      report('sweeping settled positions — one read per open window');
       const sweep = await sweepSettlements();
+      report('re-checking the loss breakers against the freshly settled ledger');
       const risk = reviewAfterSettlement();
       return ok({ sweep, tradingAllowed: risk.ok, blocked: risk.blocked });
     },
@@ -273,7 +276,10 @@ export function registerWriteTools(server: McpServer): void {
     'somnus_claim',
     'Redeem settled winning positions back into collateral. Honours dry-run and the saved ' +
       'claimEnabled rule, and records the attempt in the audit chain either way.',
-    async () => ok(await claimAll()),
+    async (report) => {
+      report('finding claimable winners, then redeeming in one transaction');
+      return ok(await claimAll());
+    },
   );
 }
 

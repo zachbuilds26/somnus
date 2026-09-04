@@ -169,13 +169,18 @@ export function registerReadTools(server: McpServer): void {
       'that every entry links to the one before it, that the recomputed head matches the ' +
       'anchor the server reports, and that every signature recovers to the configured ' +
       'signer. Also reports unsigned historical entries rather than hiding them.',
-    async () => {
+    async (report) => {
       const all = readAllFromDisk();
+      report(`re-linking ${all.length} entries`, 0, all.length);
       const result = verifyChain('0'.repeat(64), all);
       const expected = signerAddress();
       let checked = 0;
       let valid = 0;
       let unsigned = 0;
+      // The slow half by a wide margin: one ECDSA public-key recovery per entry, and
+      // the chain is already past 2,800. Reported every 100 rather than every entry —
+      // a notification per signature would cost more than the verification.
+      const STEP = 100;
       for (const e of all) {
         if (typeof e.signature !== 'string' || e.signature.length === 0) {
           unsigned++;
@@ -183,10 +188,14 @@ export function registerReadTools(server: McpServer): void {
         }
         if (!expected) continue;
         checked++;
+        if (checked % STEP === 0) {
+          report(`verified ${checked} signatures of ${all.length} entries`, checked, all.length);
+        }
         if (await verifyProofSignature(computeHash(e.prevHash, e.payloadHash, e.kind), e.signature, expected)) {
           valid++;
         }
       }
+      report(`checked ${checked} signatures across ${all.length} entries`, all.length, all.length);
       const headMatches = result.anchor === currentAnchor();
       const signaturesOk = checked === valid;
       return ok({
@@ -225,7 +234,10 @@ export function registerReadTools(server: McpServer): void {
     'Does the blockchain agree with the local ledger? Reports positions held on-chain ' +
       'with no ledger row (a lost write — real risk the limits cannot see) and ledger rows ' +
       'with no on-chain balance. Read-only: it reports drift, it never invents rows to hide it.',
-    async () => ok(await reconcile()),
+    async (report) => {
+      report('reading on-chain balances and matching them against the local ledger');
+      return ok(await reconcile());
+    },
   );
 
   simpleTool(

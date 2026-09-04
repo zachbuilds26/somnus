@@ -21,6 +21,7 @@ import { findClaimable, heldPositions, type ClaimableRow } from './settlement';
 import { appendEntry } from './store';
 import { gasCostFromReceipt, pickCollateral } from './wallet';
 import type { UserIdentity } from '../mcp/identity';
+import type { Report } from '../types';
 
 /** Trading from a wallet derived for one caller, rather than from the agent's own.
  *
@@ -349,7 +350,10 @@ export interface UserFunding {
  *  the native token — which no faucet in the SDK provides. So a brand-new derived
  *  wallet needs one manual drip of gas, and the honest thing is to say so with the
  *  address rather than let the caller discover it as a revert. */
-export async function fundUserWallet(identity: UserIdentity): Promise<UserFunding> {
+export async function fundUserWallet(
+  identity: UserIdentity,
+  report: Report = () => undefined,
+): Promise<UserFunding> {
   if (config.network !== 'testnet') {
     return {
       address: identity.address,
@@ -359,6 +363,7 @@ export async function fundUserWallet(identity: UserIdentity): Promise<UserFundin
     };
   }
 
+  report('reading your wallet balances');
   const before = await userWalletSnapshot(identity);
   const gas = before.gas;
   if (gas === undefined) {
@@ -392,8 +397,10 @@ export async function fundUserWallet(identity: UserIdentity): Promise<UserFundin
     };
   }
 
+  report('minting collateral from the faucet — this is an on-chain transaction');
   const ex = await getUserExchangeReady(identity.privateKey, identity.address);
   const tx = (await ex.trader.faucet()) as { hash?: string; receipt?: { status?: string } };
+  report('confirmed — re-reading balances');
   const after = await userWalletSnapshot(identity);
   if (tx?.receipt?.status === 'reverted') {
     return {
@@ -697,6 +704,10 @@ export interface UserQuoteOpts {
   minEdge?: number;
   /** Assets to consider, e.g. ["BTC"]. Defaults to the operator's saved symbols. */
   symbols?: string[];
+  /** Called as each window is priced, so a caller sees the scan advance instead of
+   *  waiting through a silent minute. Optional and best-effort — see `Report` in
+   *  mcp/shared.ts. Nothing here changes behaviour when it is absent. */
+  onProgress?: Report;
 }
 
 /** What the agent would trade for a caller right now, and at what price.
@@ -713,7 +724,11 @@ export async function quoteUserTrades(opts: UserQuoteOpts = {}): Promise<UserQuo
   const errors: string[] = [];
   const passed: Array<{ window: string; reason: string }> = [];
   const quotes: UserQuote[] = [];
+  // Default to a no-op so every call site below can report unconditionally. A tool
+  // whose progress is conditional on a token grows an `if` at every step.
+  const report: Report = opts.onProgress ?? (() => undefined);
 
+  report('finding tradeable windows');
   const candidates = await tradeableWindows(opts.symbols);
   if (candidates.length === 0) {
     return {
@@ -732,8 +747,17 @@ export async function quoteUserTrades(opts: UserQuoteOpts = {}): Promise<UserQuo
     };
   }
 
+  report(`reading spot and candles for ${new Set(candidates.map((c) => c.market.asset)).size} asset(s)`);
   const ctx = await buildSignalContext([...new Set(candidates.map((c) => c.market.asset))]);
+  let done = 0;
   for (const { market, policy } of candidates) {
+    // Reported BEFORE the read, not after: the book read is the slow part, so a caller
+    // watching this wants to know what is being waited on, not what already finished.
+    report(
+      `pricing ${policy.label} ${market.asset} (${done + 1} of ${candidates.length})`,
+      done,
+      candidates.length,
+    );
     try {
       const { quote, skipped } = await priceWindow(market, policy, ctx, stake, minEdge);
       if (quote) quotes.push(quote);
@@ -741,8 +765,16 @@ export async function quoteUserTrades(opts: UserQuoteOpts = {}): Promise<UserQuo
     } catch (err) {
       errors.push(`${market.symbol}: ${(err as Error).message ?? String(err)}`);
     }
+    done += 1;
   }
   quotes.sort((a, b) => b.edge - a.edge);
+  report(
+    quotes.length === 0
+      ? `priced ${candidates.length} window(s) — nothing clearing the edge bar`
+      : `priced ${candidates.length} window(s) — best edge ${quotes[0]!.edge} on ${quotes[0]!.asset}`,
+    candidates.length,
+    candidates.length,
+  );
 
   return {
     mode,
@@ -772,6 +804,12 @@ export interface UserTradeOpts {
   symbols?: string[];
   /** Nothing is sent without this. A quote is free; spending is deliberate. */
   confirm?: boolean;
+  /** Narrates the stages between "price it" and "the venue answered". This is the
+   *  path most worth reporting: pricing, the gas check, the collateral check, the
+   *  on-chain liveness check, the submit and the receipt wait were one silence, and
+   *  the submit is the step where a caller most wants to know something is happening
+   *  rather than wonder whether to retry. Best-effort — see `Report` in types.ts. */
+  onProgress?: Report;
 }
 
 export interface UserTradeResult {
@@ -797,11 +835,18 @@ export interface UserTradeResult {
   reason: string;
 }
 
-/** Price a trade for a caller and, once confirmed, send it from their own wallet. */
+/** Price a trade for a caller and, once confirmed, send it from their own wallet.
+ *
+ *  Note where the progress reporting sits: INSIDE `serialisedForUser`, so a caller
+ *  queued behind their own earlier trade is told they are waiting rather than left
+ *  wondering. The queue is per-handle and can hold a request for the length of a
+ *  whole chain round trip, which is exactly the silence worth narrating. */
 export function placeUserTrade(
   identity: UserIdentity,
   opts: UserTradeOpts = {},
 ): Promise<UserTradeResult> {
+  const report: Report = opts.onProgress ?? (() => undefined);
+  report('queued behind any earlier trade from this wallet');
   return serialisedForUser(identity.handle, () => executeUserTrade(identity, opts));
 }
 
@@ -810,6 +855,7 @@ async function executeUserTrade(
   opts: UserTradeOpts,
 ): Promise<UserTradeResult> {
   const base = { handle: identity.handle, address: identity.address, mode: userTradingMode() };
+  const report: Report = opts.onProgress ?? (() => undefined);
   const availability = userTradingAvailable();
   if (!availability.ok) {
     return { ...base, placed: false, reason: `cannot trade: ${availability.reason}` };
@@ -822,6 +868,7 @@ async function executeUserTrade(
   let quote: UserQuote | undefined;
   let why = '';
   if (opts.symbol) {
+    report(`finding the window matching ${opts.symbol}`);
     const market = await findWindow(opts.symbol);
     if (!market) {
       return {
@@ -841,6 +888,7 @@ async function executeUserTrade(
     if (policy.tier === 'blocked') {
       return { ...base, placed: false, cap, reason: `this window is not tradeable: ${policy.note}` };
     }
+    report(`pricing ${policy.label} ${market.asset} against the live book`);
     const ctx = await buildSignalContext([market.asset]);
     const priced = await priceWindow(
       market,
@@ -852,10 +900,13 @@ async function executeUserTrade(
     quote = priced.quote;
     why = priced.skipped ?? '';
   } else {
+    // The scan's own per-window progress is passed straight through, so choosing the
+    // best window looks the same to a caller whether they named one or not.
     const scan = await quoteUserTrades({
       ...(opts.stake !== undefined ? { stake: opts.stake } : {}),
       ...(opts.minEdge !== undefined ? { minEdge: opts.minEdge } : {}),
       ...(opts.symbols !== undefined ? { symbols: opts.symbols } : {}),
+      ...(opts.onProgress !== undefined ? { onProgress: opts.onProgress } : {}),
     });
     quote = scan.quotes[0];
     why = scan.note;
@@ -932,6 +983,7 @@ async function executeUserTrade(
   // acceptable backstop because the operator chose to run it. Here the cost of
   // guessing wrong is somebody else's gas spent on a certain revert, and the cost of
   // refusing is a retry. So an unknown balance is a refusal with a clear reason.
+  report('checking your wallet can pay for it');
   const wallet = await userWalletSnapshot(identity);
   if (wallet.gas === undefined) {
     return {
@@ -989,6 +1041,7 @@ async function executeUserTrade(
 
   // The indexer trails the chain, so a window it still lists as open may already be
   // locked. Checking costs a read; not checking costs gas on a certain revert.
+  report('confirming the window is still open on-chain');
   if (quote.marketId && !(await isMarketTrading(quote.marketId))) {
     return {
       ...base,
@@ -1002,7 +1055,15 @@ async function executeUserTrade(
 
   // ── send it, from the caller's own wallet ───────────────────────────────────
   try {
+    report('opening a signing client for your wallet');
     const exchange = await getUserExchangeReady(identity.privateKey, identity.address);
+    // The one step where silence is actively harmful: past this line collateral may
+    // have moved, so a caller who gives up and retries can end up with two positions.
+    // Say that the order is out and being waited on.
+    report(
+      `submitting: ${quote.contracts} ${quote.side} on ${quote.asset} at ${quote.limitPrice} ` +
+        `(${quote.cost} tUSDC) — waiting for the venue`,
+    );
     const result = await placeOrderOnExchange(exchange, {
       symbol: quote.outcomeSymbol,
       price: quote.limitPrice,
@@ -1017,6 +1078,7 @@ async function executeUserTrade(
     });
     const gasNative = gasCostFromReceipt(result.receipt);
     noteUserTrade(identity.handle);
+    report('recording it in the signed audit chain');
     await appendUserOrder(identity, quote, {
       status: 'submitted',
       dryRun: false,
@@ -1235,13 +1297,22 @@ export interface UserClaimResult {
 export function claimUserPositions(
   identity: UserIdentity,
   confirm = false,
+  report: Report = () => undefined,
 ): Promise<UserClaimResult> {
-  return serialisedForUser(identity.handle, () => executeUserClaim(identity, confirm));
+  report('queued behind any earlier request from this wallet');
+  return serialisedForUser(identity.handle, () => executeUserClaim(identity, confirm, report));
 }
 
-async function executeUserClaim(identity: UserIdentity, confirm: boolean): Promise<UserClaimResult> {
+async function executeUserClaim(
+  identity: UserIdentity,
+  confirm: boolean,
+  report: Report = () => undefined,
+): Promise<UserClaimResult> {
   const mode = userTradingMode();
   const base = { mode, address: identity.address, handle: identity.handle };
+  // Scanning walks every position this wallet holds, one settlement read each, so on a
+  // busy wallet this alone is most of the wait.
+  report('scanning your positions for settled winners');
   const scan = await findClaimable(identity.address);
   const total = scan.totalEstPayoutHuman;
 
@@ -1280,6 +1351,10 @@ async function executeUserClaim(identity: UserIdentity, confirm: boolean): Promi
     amount: BigInt(c.amount),
   }));
   try {
+    report(
+      `redeeming ${entries.length} position(s) worth about ${total} tUSDC in one transaction — ` +
+        'waiting for confirmation',
+    );
     const exchange = await getUserExchangeReady(identity.privateKey, identity.address);
     const tx = (await exchange.trader.redeemMany({ entries } as never)) as {
       hash?: string;

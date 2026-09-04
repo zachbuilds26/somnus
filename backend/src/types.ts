@@ -259,3 +259,19 @@ export interface SignalResult {
   fair: number;
   note?: string;
 }
+
+/** Say what a slow operation is doing WHILE it does it.
+ *
+ *  Lives here rather than in `mcp/shared.ts` because a service should not have to
+ *  import the MCP layer to be able to narrate itself — the MCP layer supplies an
+ *  implementation (`reporter`), and an HTTP route or a CLI script could supply a
+ *  different one without either knowing about the other.
+ *
+ *  Every implementation must be safe to call unconditionally: no throwing, no
+ *  awaiting, and a no-op when nobody is listening. That is what lets business logic
+ *  report freely instead of guarding every call with a check for an audience.
+ *
+ *  `progress` and `total` are the machine-readable pair some clients render as a bar;
+ *  `message` is the sentence a person reads. Send the message always — a bare
+ *  fraction tells you how far along something is but never what it is doing. */
+export type Report = (message: string, progress?: number, total?: number) => void;
