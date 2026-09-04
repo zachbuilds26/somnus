@@ -102,15 +102,23 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
       description:
         'What would the agent trade for you right now, and at what price? Prices the live ' +
         'windows with the same model, horizon tiers and edge bar it applies to its own ' +
-        'money, sized to your stake. Reads only — it signs nothing and spends nothing, and ' +
-        'an empty answer is the normal one: the model acts only when the book disagrees ' +
-        'with it.',
+        'money, sized to your stake. Your stake is a ceiling: on a window class the model ' +
+        'has not yet proven itself on it deliberately sizes at half and demands double the ' +
+        'edge, so read each quote\'s sizingNote for why it costs what it costs. Reads only ' +
+        '— it signs nothing and spends nothing, and an empty answer is the normal one: the ' +
+        'model acts only when the book disagrees with it.',
       inputSchema: {
         stake: z
           .number()
           .positive()
           .optional()
-          .describe(`Collateral to risk on one trade, tUSDC. Clamped to ${maxUserStake()}.`),
+          .describe(
+            `Collateral to risk on one trade, tUSDC. Clamped to ${maxUserStake()}. This is a ` +
+              'CEILING, not a fixed amount: a window whose horizon class the model has not ' +
+              'proven itself on is sized at half, and contracts are whole units so the ' +
+              'remainder is left unspent. Every quote reports stakeUsed and a sizingNote ' +
+              'explaining its own cost.',
+          ),
         minEdge: z
           .number()
           .min(0)
@@ -152,7 +160,10 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
           .number()
           .positive()
           .optional()
-          .describe(`Collateral to risk, tUSDC. Clamped to ${maxUserStake()}.`),
+          .describe(
+            `Collateral to risk, tUSDC. Clamped to ${maxUserStake()}. A CEILING, not a fixed ` +
+              'amount — see sizingNote on the result for why a given trade cost less.',
+          ),
         minEdge: z.number().min(0).max(1).optional().describe('Extra edge to demand before trading'),
         symbols: z.array(z.string()).optional().describe('Assets to consider when no symbol is given'),
         confirm: z.boolean().optional().describe('true = actually send it. Nothing is sent without this.'),

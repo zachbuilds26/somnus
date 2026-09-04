@@ -128,6 +128,7 @@ What bounds a trade placed this way:
 
 - `confirm: true` on the call that spends — a quote is free, a purchase is deliberate
 - a hard per-trade cap (1000 tUSDC by default, a tenth of one faucet drip) and an hourly per-token rate limit, neither of which a tool argument can raise. Ask for more and you are clamped down and told so; ask for nothing and it stakes the cap, so name a number if you want a smaller bet
+- your stake is a **ceiling, not a fixed amount**. Two things shrink it, and every quote says which in plain words (`sizingNote`, next to `stakeRequested` and `stakeUsed`): a window class the model has not yet proven itself on is sized at **half** and demands **double** the edge, and contracts are whole units so the remainder after the last one is left unspent. Ask to risk 10 on an hourly window and expect about 4.85 — deliberately, and now stated rather than inferred from the cost
 - the operator's kill switch: a paused deployment adds no new risk of any kind, including yours
 - the same model, horizon tiers and edge bar the agent applies to its own money (you can demand *more* edge, never less)
 - your wallet's own balance — it can only spend what you funded

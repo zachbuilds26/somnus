@@ -450,6 +450,22 @@ export interface UserQuote {
   contracts: number;
   /** Collateral this costs, at the limit price. */
   cost: number;
+  /** What the caller ASKED to risk on this trade, after the per-trade cap.
+   *
+   *  Reported next to `stakeUsed` because the two differ silently and that was
+   *  genuinely confusing: ask for 10, get a 5.00 cost back, and nothing said why.
+   *  The reduction is the horizon tier doing its job, but a number the caller did
+   *  not choose has to be stated, not left to be inferred from `cost`. */
+  stakeRequested: number;
+  /** What was actually sized against: `stakeRequested x sizeMultiplier`. Equal to
+   *  `stakeRequested` on a validated window, half of it on a provisional one. */
+  stakeUsed: number;
+  /** The tier's size multiplier — 1 for validated, 0.5 for provisional by default
+   *  (`AGENT_PROVISIONAL_SIZE_MULT`). */
+  sizeMultiplier: number;
+  /** Plain-language account of how `stakeRequested` became `cost`, including the
+   *  round-down to whole contracts. Written to be shown verbatim to whoever asked. */
+  sizingNote: string;
   /** Each contract pays 1 tUSDC if the outcome wins. */
   payoutIfWin: number;
   edge: number;
@@ -457,6 +473,52 @@ export interface UserQuote {
   /** How the fair value was arrived at — spot, reference level, time, volatility. */
   model: string;
   reason: string;
+}
+
+/** The measured reason a class sits in its tier, without the multipliers restated.
+ *
+ *  `policy.note` ends with "— demanding 2x edge at 0.5x size", which is written for
+ *  the proof entry. Here the percentage has already been said in the caller's own
+ *  numbers, so repeating it twice in one sentence reads like a machine wrote it. What
+ *  is worth keeping is the evidence: the Brier score and sample count are the reason
+ *  to believe the tier, not just the verdict. */
+function evidence(policy: TradeablePolicy): string {
+  return policy.note.replace(/\s*[—-]\s*demanding\s.*$/i, '').trim();
+}
+
+/** Say out loud how a requested stake became a cost.
+ *
+ *  Two things shrink it and neither was ever stated. The horizon tier halves the
+ *  budget on a window class the model has not proven itself on, and contracts are
+ *  whole numbers so the remainder after the last one is unspendable. A caller who
+ *  asked for 10 and was charged 4.62 deserves both sentences, not a `reason` string
+ *  ending in "0.5x size" that nobody reads. */
+export function sizingNote(
+  requested: number,
+  used: number,
+  cost: number,
+  policy: TradeablePolicy,
+): string {
+  const parts: string[] = [];
+  if (used < requested) {
+    const pct = Math.round(policy.sizeMultiplier * 100);
+    parts.push(
+      `You asked to risk ${requested.toFixed(2)} and this was sized against ${used.toFixed(2)} ` +
+        `(${pct}% of it) because the ${policy.label} window class is ${policy.tier}: ` +
+        `${evidence(policy)}. Full stake goes to validated classes only.`,
+    );
+  } else {
+    parts.push(`Sized against your full ${requested.toFixed(2)} — the ${policy.label} class is validated.`);
+  }
+  // Only worth a sentence when the rounding actually cost something visible.
+  const dust = used - cost;
+  if (dust >= 0.01) {
+    parts.push(
+      `Cost is ${cost.toFixed(2)}, not ${used.toFixed(2)}: contracts are whole units, so ` +
+        `${dust.toFixed(2)} was left unspent rather than buying a fraction.`,
+    );
+  }
+  return parts.join(' ');
 }
 
 /** Price one window for a caller, or say why it is not tradeable.
@@ -523,8 +585,19 @@ async function priceWindow(
 
   const contracts = Math.floor(budget / limitPrice);
   if (contracts < 1) {
-    return { skipped: `${budget.toFixed(2)} buys no whole contract at ${limitPrice}` };
+    // Say which number failed, and why it is not the one the caller named. "5.00 buys
+    // no whole contract" is baffling when you asked to risk 10.
+    return {
+      skipped:
+        `${budget.toFixed(2)} buys no whole contract at ${limitPrice}` +
+        (budget < stake
+          ? ` — that is ${Math.round(policy.sizeMultiplier * 100)}% of the ${stake.toFixed(2)} you asked ` +
+            `to risk, because the ${policy.label} class is ${policy.tier}`
+          : ''),
+    };
   }
+
+  const cost = round2(limitPrice * contracts);
 
   const nowSec = Math.floor(Date.now() / 1000);
   return {
@@ -543,7 +616,11 @@ async function priceWindow(
       quoted: round4(quoted),
       limitPrice,
       contracts,
-      cost: round2(limitPrice * contracts),
+      cost,
+      stakeRequested: round2(stake),
+      stakeUsed: round2(budget),
+      sizeMultiplier: policy.sizeMultiplier,
+      sizingNote: sizingNote(stake, budget, cost, policy),
       payoutIfWin: contracts,
       edge: round4(fairForSide - quoted),
       requiredEdge: round4(minEdge * policy.edgeMultiplier),
@@ -596,7 +673,12 @@ async function findWindow(symbol: string): Promise<EventMarketRow | undefined> {
 
 export interface UserQuoteResult {
   mode: UserTradingMode;
-  /** Collateral the quotes were sized against, after clamping to the cap. */
+  /** What the caller asked to risk per trade, after clamping to the cap.
+   *
+   *  NOT necessarily what any quote was sized against — the comment here used to say
+   *  it was, and that was the whole confusion. A provisional horizon halves the
+   *  budget, so a caller asking for 10 gets quotes costing about 5. Each quote now
+   *  carries its own `stakeUsed` and a `sizingNote` that says so in words. */
   stake: number;
   cap: number;
   stakeClamped: boolean;
@@ -676,8 +758,8 @@ export async function quoteUserTrades(opts: UserQuoteOpts = {}): Promise<UserQuo
       quotes.length === 0
         ? `priced ${candidates.length} window(s) and found nothing clearing a ${minEdge} edge bar. ` +
           'That is the normal state — the model only acts when the book disagrees with it.'
-        : `best edge ${quotes[0]!.edge} on ${quotes[0]!.window}. Prices move: somnus_my_trade ` +
-          're-reads the book and re-prices before it sends anything.',
+        : `best edge ${quotes[0]!.edge} on ${quotes[0]!.window}. ${quotes[0]!.sizingNote} ` +
+          'Prices move: somnus_my_trade re-reads the book and re-prices before it sends anything.',
   };
 }
 
@@ -800,7 +882,8 @@ async function executeUserTrade(
       reason:
         `quote only — nothing sent. Call again with confirm:true to buy ${quote.contracts} ` +
         `${quote.side} contract(s) on ${quote.window} for ${quote.cost} tUSDC, paying out ` +
-        `${quote.payoutIfWin} if it wins. The book will be re-read and re-priced then.`,
+        `${quote.payoutIfWin} if it wins. ${quote.sizingNote} ` +
+        'The book will be re-read and re-priced then.',
     };
   }
 
@@ -967,7 +1050,7 @@ async function executeUserTrade(
       reason:
         filled !== undefined && filled > 0
           ? `bought ${filled} ${quote.side} contract(s) on ${quote.window} at ${paidPrice} for ` +
-            `${cost ?? '?'} tUSDC.${partial} It settles by itself at ${
+            `${cost ?? '?'} tUSDC.${partial} ${quote.sizingNote} It settles by itself at ${
               quote.expiry ? new Date(quote.expiry * 1000).toISOString() : 'the window expiry'
             }; run somnus_my_claim afterwards to redeem a winner.`
           : `the order found no fill: ${result.reason}`,
