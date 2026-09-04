@@ -41,9 +41,29 @@ export interface WalletSnapshot {
   error?: string;
 }
 
-/** Balance reads are RPC round-trips and a cycle prices a dozen markets, so cache
- *  briefly. Short enough that a faucet top-up shows up within one cycle. */
-const TTL_MS = Number(process.env.AGENT_WALLET_TTL_MS ?? 10_000);
+/** How long a balance read stays usable.
+ *
+ *  90s, not the 10s it was. The old value was shorter than the read it cached —
+ *  `fetchBalance` walks every currency the venue lists plus every outcome token held,
+ *  and measured ~20s cold on a real wallet. A 10s TTL therefore expired before it could
+ *  ever be reused, so a cycle paid the full 20s again mid-flight and aged its own spot
+ *  reading past `maxDataAgeMs`. A cache that cannot outlive one use is not a cache.
+ *
+ *  Safe to hold this long because the two things that move the balance are both
+ *  accounted for without a re-read: our own spending is subtracted by
+ *  `committedSinceRead`, and `beginCycle` forces a fresh read at the top of every cycle.
+ *  What a long TTL can miss is an EXTERNAL top-up (a faucet drip mid-cycle) showing up
+ *  late — one cycle late, on a number that only ever gates spending downward. That is
+ *  the right trade against silently capping the agent at one order per cycle.
+ *
+ *  `/health` and `somnus_my_wallet` read through the same cache, so a balance shown
+ *  there can be up to 90s old; both call sites are informational, and anything needing
+ *  the current number passes `force`.
+ *
+ *  Exported so a test can assert the floor without importing a private. A silent revert
+ *  to 10s would reinstate the one-order-per-cycle cap with nothing to catch it. */
+export const WALLET_TTL_MS = Number(process.env.AGENT_WALLET_TTL_MS ?? 90_000);
+const TTL_MS = WALLET_TTL_MS;
 let cache: WalletSnapshot | undefined;
 /** Collateral committed since the cached balance was READ.
  *

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { MODEL_VERSION, STRATEGY_VERSION, warn } from '../config';
+import { MODEL_VERSION, STRATEGY_VERSION, debug, warn } from '../config';
 import { consumeTradeQuota, effectiveDryRun, loadAgentConfig } from '../agent-config';
 import type { AgentConfigDoc } from '../types';
 import { findEventMarket } from './sdk';
 import { appendEntry } from './store';
 import { openNotional, openPositions, recordFill, recordGas } from './pnl';
-import { canAfford, equity, gasCostFromReceipt, noteCommitted } from './wallet';
+import { canAfford, equity, gasCostFromReceipt, noteCommitted, walletSnapshot } from './wallet';
 import {
   clearExecutionFailures,
   dataFresh,
@@ -582,6 +582,32 @@ export async function beginCycle(
     warn('could not read open positions, treating limit as reached:', (err as Error).message);
     openBaseline = Number.MAX_SAFE_INTEGER;
     openByMarket = new Map();
+  }
+
+  // Pay for the balance read HERE, before the caller reads spot.
+  //
+  // This is a latency fix, not a correctness one, and it is worth spelling out because
+  // the symptom looked nothing like the cause. `canAfford` walks every currency the
+  // venue lists plus every outcome token held — measured at ~20s cold on this wallet.
+  // It used to run lazily, inside the FIRST `executeDecision`, which is after the cycle
+  // has already built its signal context. So the first order paid 20s and every decision
+  // behind it inherited a spot reading 20s+ old, which `dataFresh` then rejected against
+  // `maxDataAgeMs` (15s). Orders 2..N were refused as stale no matter how much edge they
+  // had, and `maxOrdersPerCycle: 5` could never mean more than 1.
+  //
+  // Reversed, the ordering matches how fast each input actually moves: balances change
+  // slowly and are read once up front; spot changes fast and is read last, right before
+  // it is judged. Forced, so a cycle never opens on a cached balance from the last one.
+  //
+  // Skipped in dry-run: nothing is spent, so there is nothing to afford, and a rehearsal
+  // should not spend 20s on a number it will not use.
+  try {
+    await walletSnapshot(true);
+  } catch (err) {
+    // Non-fatal by design. `canAfford` fails OPEN on an unreadable balance, so a failed
+    // warm-up leaves the agent exactly as it was before this line existed — slower, not
+    // broken.
+    debug('beginCycle: wallet warm-up failed, canAfford will read lazily:', (err as Error).message);
   }
 }
 
