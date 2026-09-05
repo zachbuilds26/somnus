@@ -6,7 +6,7 @@ import { loopStatus, startLoop, stopLoop } from '../services/loop';
 import { claimAll, findClaimable, sweepSettlements } from '../services/settlement';
 import { pauseTrading, resumeTrading, reviewAfterSettlement } from '../services/risk';
 import { reconcile } from '../services/reconcile';
-import { recentEvents, subscribe } from '../services/events';
+import { recentEvents, subscribe, subscriberCount } from '../services/events';
 import { appendEntry, currentAnchor, readChainPage } from '../services/store';
 import { pnlSummary, pnlRecent, verifyLedgerAgainstChain } from '../services/pnl';
 import { buildPerformanceReport } from '../services/report';
@@ -319,7 +319,29 @@ agentRouter.get('/agent/reconcile', async (_req, res) => {
  *
  *  The proof chain stays the durable record — this is a push channel for whoever is
  *  currently watching. A client that missed an event reads it from /proof. */
+/** Concurrent SSE streams allowed at once.
+ *
+ *  Every connection adds a listener and a 15-second keepalive timer, neither of which had
+ *  a ceiling — and `publish` walks every listener from the TRADING path, so an unbounded
+ *  subscriber list is iterated between a decision and its order. Held-open connections
+ *  cost a client nothing to create and never expire on their own.
+ *
+ *  50 is far above any real dashboard count and far below a level that costs anything. */
+const MAX_STREAMS = Number(process.env.SOMNUS_MAX_STREAMS ?? 50);
+
 agentRouter.get('/agent/stream', (req, res) => {
+  if (subscriberCount() >= MAX_STREAMS) {
+    // A plain JSON refusal rather than an SSE frame: the client has not been upgraded to a
+    // stream yet, so it can still read a normal body and a status code.
+    res.status(503).json({
+      ok: false,
+      error:
+        `${subscriberCount()} event streams are already open (limit ${MAX_STREAMS}). Each one is ` +
+        'iterated on the trading path, so the cap is a trading-safety limit rather than a ' +
+        'bandwidth one. Close an existing stream, or poll GET /agent/logs instead.',
+    });
+    return;
+  }
   res.set({
     'content-type': 'text/event-stream',
     'cache-control': 'no-cache, no-transform',

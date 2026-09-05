@@ -87,6 +87,12 @@ Tests run offline — no RPC, no indexer, no keys. They use a temp data dir and 
 
 Set `SOMNUS_API_KEY` to require `X-API-Key` on mutating routes.
 
+**What is metered, and what deliberately isn't.** `POST /mcp` is capped at 60 requests per minute per caller — counted per `x-somnus-token` when one is sent, per IP otherwise, so two people behind one NAT are two callers and one caller rotating IPs is still one. High enough that no person, agent or judge will reach it; low enough to stop an unattended loop, since one `somnus_my_quote` reads eight order books. `GET /agent/stream` is capped at 50 concurrent streams, because `publish` walks every subscriber from the trading path — that cap is a trading-safety limit, not a bandwidth one.
+
+`/health`, `/metrics` and the market reads are **not** metered. They exist to be polled, `/metrics` is a Prometheus scrape target, and a 429 in front of somebody legitimately trying the service is a worse outcome than the load it saves. The one genuinely asymmetric case — a tiny request costing 78 seconds of CPU on `/proof/verify` — was fixed by [bounding the work itself](#bounding-a-keyless-verifier), which is a better answer than counting requests.
+
+Tunable: `SOMNUS_MCP_RATE_LIMIT`, `SOMNUS_MAX_STREAMS`, `SOMNUS_RATE_BUCKETS`.
+
 ---
 
 ## Use it from your coding agent (MCP)
@@ -319,7 +325,7 @@ Run `npm run horizon-study` to re-score and promote/demote tiers. The agent pick
 
 ```bash
 npm run typecheck     # tsc --noEmit
-npm test              # 245 unit + regression tests, no network, no keys
+npm test              # 255 unit + regression tests, no network, no keys
 npm run doctor        # read-only connectivity probe (no keys needed)
 npm run faucet        # mint test tUSDC to trade key (testnet)
 npm run claim         # report claimable settled positions

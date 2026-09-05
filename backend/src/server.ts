@@ -19,6 +19,21 @@ import { alertsConfigured } from './services/alerts';
 
 const app = express();
 
+/** Trust exactly one proxy hop.
+ *
+ *  Render (and any similar host) terminates TLS and forwards, so without this `req.ip`
+ *  reports the PROXY's address for every request on earth. That is not merely imprecise:
+ *  a per-caller rate limiter keyed on it degenerates into one shared bucket, and the first
+ *  burst of traffic would 429 everybody at once — the exact failure a limiter is supposed
+ *  to prevent.
+ *
+ *  `1`, not `true`: trusting every hop lets a caller prepend whatever `X-Forwarded-For`
+ *  they like and appear to be a different client on each request. One hop is the one the
+ *  host actually controls.
+ *
+ *  Harmless locally, where there is no proxy and no forwarded header to read.        */
+app.set('trust proxy', 1);
+
 /** CORS is deliberately NOT wildcard.
  *
  *  This process can hold a funded key and expose "start trading" as an

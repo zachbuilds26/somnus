@@ -5,6 +5,7 @@ import { log, warn } from '../config';
 import { registerReadTools } from './tools-read';
 import { registerUserTools } from './tools-user';
 import { IdentityError, identityFromHeaders, perUserWalletsEnabled, TOKEN_HEADER } from './identity';
+import { RateLimiter, rateKeyFor } from '../services/rate-limit';
 import { userTradingMode } from '../services/user-trading';
 
 /** Hosted MCP endpoint — read tools for everyone, plus the caller's own wallet.
@@ -50,8 +51,41 @@ const NO_TOKEN =
   `the funds in it — treat it like a password, and use at least 24 characters. The read-only ` +
   `tools work without any of this.`;
 
+/** Requests per caller per minute on /mcp.
+ *
+ *  Generous by design: 60/min is far more than a person, a coding agent, or a judge poking
+ *  at the endpoint will ever produce, and well below what a script looping
+ *  `somnus_my_quote` — eight order-book reads a call — would. The point is to stop an
+ *  unattended loop, not to police normal use, because a 429 in front of somebody genuinely
+ *  trying the service is a worse outcome than the load it saves.
+ *
+ *  Counted per TOKEN where one is sent, per IP otherwise (see `rateKeyFor`). */
+const MCP_LIMIT = Number(process.env.SOMNUS_MCP_RATE_LIMIT ?? 60);
+const mcpLimiter = new RateLimiter(MCP_LIMIT, 60_000);
+
 export function mountMcp(app: Express): void {
   const handler = async (req: Request, res: Response): Promise<void> => {
+    // Metered before any work: the whole point is to refuse cheaply. A JSON-RPC error
+    // rather than a bare 429 body, because the caller is an MCP client and will surface a
+    // protocol error to its user where it would swallow an HTTP one.
+    const raw = req.headers[TOKEN_HEADER];
+    const token = Array.isArray(raw) ? raw[0] : raw;
+    const verdict = mcpLimiter.check(rateKeyFor(token, req.ip));
+    if (!verdict.ok) {
+      res.status(429).set('retry-after', String(verdict.retryAfterSec ?? 60)).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message:
+            `rate limit: ${verdict.used} requests in the last minute (limit ${verdict.limit}). ` +
+            `Retry in ${verdict.retryAfterSec ?? 60}s. Counted per token when you send one, ` +
+            'per IP otherwise — a quote prices eight windows, so this bounds an unattended loop.',
+        },
+        id: null,
+      });
+      return;
+    }
+
     // A fresh server+transport per request. Reusing one transport across concurrent
     // requests interleaves their JSON-RPC framing; construction is cheap because the
     // tools close over module state rather than holding any of their own.
