@@ -6,158 +6,169 @@
 <title>Somnus — an autonomous trading agent that can prove what it did</title>
 <meta name="description" content="Somnus reads live DreamDEX Event Contract books on Somnia, forms its own probability estimates, and trades inside hard limits. Every decision is written to a signed hash chain anyone can verify." />
 <meta property="og:title" content="Somnus" />
-<meta property="og:description" content="An autonomous trading agent for DreamDEX Event Contracts on Somnia. Every decision signed, hash-linked, and publicly verifiable." />
+<meta property="og:description" content="An autonomous trading agent for DreamDEX Event Contracts on Somnia. Every decision signed, hash-linked, publicly verifiable." />
+<meta name="theme-color" content="#000000" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M27 17 A40 40 0 1 0 73 17' fill='none' stroke='white' stroke-width='11'/%3E%3Cpath d='M33 27 L50 10 L67 27 L58 27 L50 18 L42 27 Z' fill='%23FF0088'/%3E%3C/svg%3E" />
 <style>
+  /* Tokens taken from testnet.somnia.network's own stylesheet so this sits beside it
+     rather than merely near it: --surface-default #141414, --surface-raised #1c1c1c,
+     --radius .75rem, Source Code Pro throughout, 40/32/24/20px headings. Their action
+     colour (#5c16cc, purple) is the one deliberate substitution — Somnus is #FF0088. */
   :root {
-    --ink: #ffffff;
-    --ink-2: #a9a9ad;
-    --ink-3: #6e6e75;
-    --bg: #000000;
-    --bg-2: #0a0a0b;
-    --line: #1e1e21;
-    --line-2: #2b2b2f;
-    --accent: #FF0088;
-    --ok: #4ade80;
-    --warn: #fbbf24;
-    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --page: #000;
+    --card: #141414;
+    --raised: #1c1c1c;
+    --elevated: #2f2f2f;
+    --heading: #fff;
+    --body: #d3d3d3;
+    --muted: #666;
+    --action: #FF0088;
+    --action-hover: #d9006f;
+    --radius: 0.75rem;
+    --h1: 40px; --h2: 32px; --h3: 24px; --h4: 20px;
+    --p1: 20px; --p3: 16px; --p4: 14px;
+    --l4: 14px; --l5: 12px;
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: 'Space Grotesk', system-ui, sans-serif;
-    font-size: 16px;
-    line-height: 1.6;
+    background: var(--page);
+    color: var(--body);
+    font-family: 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--p3);
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3 { font-family: 'Unbounded', system-ui, sans-serif; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+  h1, h2, h3, h4 { color: var(--heading); font-weight: 600; line-height: 1; margin: 0; }
+  h1 { font-size: var(--h1); }
+  h2 { font-size: var(--h2); }
+  h3 { font-size: var(--h3); }
+  h4 { font-size: var(--h4); }
+  p { margin: 0; }
   a { color: inherit; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
-  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  code { font-family: inherit; color: var(--heading); }
+  .wrap { width: 100%; max-width: 1360px; margin: 0 auto; padding: 0 24px; }
+  :focus-visible { outline: 2px solid rgba(255,255,255,0.28); outline-offset: 2px; }
+  @media (max-width: 640px) { :root { --h1: 30px; --h2: 24px; --h3: 20px; --p1: 17px; } }
 
-  /* ── nav ─────────────────────────────────────────────────────────── */
-  nav {
-    position: sticky; top: 0; z-index: 20;
-    background: rgba(0,0,0,0.72);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--line);
-  }
-  .nav-in { display: flex; align-items: center; justify-content: space-between; height: 68px; }
-  .brand { display: flex; align-items: center; gap: 0; text-decoration: none; }
+  /* ── nav: 64px bar, logo left, links right ───────────────────────────── */
+  nav { position: sticky; top: 0; z-index: 30; height: 64px; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); }
+  .nav-in { height: 64px; display: flex; align-items: center; justify-content: space-between; }
   .wordmark {
-    font-family: 'Unbounded', sans-serif; font-weight: 700; font-size: 19px;
-    letter-spacing: 0.06em; display: inline-flex; align-items: center; gap: 1px;
+    display: inline-flex; align-items: center; font-weight: 700; font-size: var(--h4);
+    letter-spacing: 0.04em; color: var(--heading); text-decoration: none;
   }
-  .wordmark .mark { width: 0.92em; height: 0.92em; margin: 0 0.02em; position: relative; top: 0.03em; }
-  .nav-links { display: flex; align-items: center; gap: 28px; font-size: 14px; color: var(--ink-2); }
+  .wordmark .mark { width: 0.95em; height: 0.95em; margin: 0 0.03em; position: relative; top: 0.04em; }
+  .nav-links { display: flex; align-items: center; gap: 28px; font-size: var(--l4); color: var(--body); }
   .nav-links a { text-decoration: none; }
-  .nav-links a:hover { color: var(--ink); }
+  .nav-links a:hover { color: var(--heading); }
   @media (max-width: 720px) { .nav-links .hide-sm { display: none; } }
 
-  /* ── hero ────────────────────────────────────────────────────────── */
-  header { padding: 96px 0 72px; border-bottom: 1px solid var(--line); }
-  h1 { font-size: clamp(34px, 6.2vw, 62px); line-height: 1.06; max-width: 15ch; }
-  .sub { color: var(--ink-2); font-size: clamp(16px, 2vw, 19px); max-width: 58ch; margin: 24px 0 0; }
-  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; align-items: center; }
+  /* ── buttons: 48px tall, filled or outline, 12px radius ──────────────── */
   .btn {
-    display: inline-flex; align-items: center; gap: 9px;
-    font: inherit; font-weight: 500; font-size: 15px;
-    padding: 12px 20px; border-radius: 2px; border: 1px solid var(--line-2);
-    background: transparent; color: var(--ink); text-decoration: none; cursor: pointer;
-    transition: border-color .15s, background .15s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+    height: 48px; padding: 0 24px; border-radius: var(--radius);
+    font: inherit; font-size: var(--l2, 18px); font-weight: 600;
+    text-decoration: none; cursor: pointer; white-space: nowrap;
+    border: 1px solid transparent; background: var(--raised); color: var(--heading);
+    transition: background .15s, border-color .15s;
   }
-  .btn:hover { border-color: var(--ink-3); background: var(--bg-2); }
-  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #d9006f; border-color: #d9006f; }
-  .btn svg { width: 16px; height: 16px; }
+  .btn:hover { background: var(--elevated); }
+  .btn svg { width: 24px; height: 24px; flex: none; }
+  .btn-primary { background: var(--action); color: #fff; }
+  .btn-primary:hover { background: var(--action-hover); }
+  .btn-ghost { background: transparent; border-color: var(--elevated); }
+  .btn-ghost:hover { background: var(--raised); }
 
-  /* ── generic section ─────────────────────────────────────────────── */
-  section { padding: 72px 0; border-bottom: 1px solid var(--line); }
-  .eyebrow {
-    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
-    color: var(--ink-3); margin: 0 0 14px;
+  /* ── hero: full viewport minus the bar, centred, gradient-faded edges ── */
+  .hero { position: relative; min-height: calc(100dvh - 64px); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .hero canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .fade { pointer-events: none; position: absolute; left: 0; right: 0; height: 96px; z-index: 10; }
+  .fade-top { top: 0; background: linear-gradient(to bottom, var(--page), transparent); }
+  .fade-bot { bottom: 0; background: linear-gradient(to top, var(--page), transparent); }
+  .hero-in { position: relative; z-index: 20; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 32px; padding: 64px 24px; }
+  .hero h1 { max-width: 20ch; }
+  .hero .sub { font-size: var(--p1); color: var(--body); max-width: 60ch; line-height: 1.45; }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; margin-top: 8px; }
+  .kicker { font-size: var(--l5); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+
+  /* ── sections ─────────────────────────────────────────────────────────── */
+  section.band { padding: 96px 0; }
+  .band-head { display: flex; flex-direction: column; gap: 16px; align-items: center; text-align: center; margin-bottom: 48px; }
+  .band-head p { font-size: var(--p1); color: var(--body); max-width: 66ch; line-height: 1.45; }
+
+  /* ── cards: gapped grid, 12px radius, 64px icon, button at the foot ──── */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border-radius: var(--radius); padding: 32px;
+    display: flex; flex-direction: column; gap: 32px; justify-content: space-between; height: 100%;
   }
-  h2 { font-size: clamp(24px, 3.4vw, 34px); line-height: 1.15; max-width: 22ch; }
-  .lede { color: var(--ink-2); max-width: 62ch; margin: 18px 0 0; }
+  .card-top { display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
+  .card-top svg { width: 64px; height: 64px; color: var(--heading); }
+  .card-txt { display: flex; flex-direction: column; gap: 12px; }
+  .card p { font-size: var(--p3); color: var(--muted); line-height: 1.45; }
 
-  /* ── three cards, as on the Somnia testnet page ──────────────────── */
-  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 44px; background: var(--line); border: 1px solid var(--line); }
-  .card { background: var(--bg); padding: 28px 24px 24px; display: flex; flex-direction: column; min-height: 208px; }
-  .card h3 { font-size: 17px; }
-  .card p { color: var(--ink-2); font-size: 14.5px; margin: 12px 0 0; flex: 1; }
-  .card-act { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 500; text-decoration: none; margin-top: 20px; }
-  .card-act svg { width: 15px; height: 15px; }
-  .card-act:hover { color: var(--accent); }
-  @media (max-width: 800px) { .cards { grid-template-columns: 1fr; } .card { min-height: 0; } }
+  /* ── the record: four figures on card surfaces ────────────────────────── */
+  .figs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+  @media (max-width: 900px) { .figs { grid-template-columns: repeat(2, 1fr); } }
+  .fig { background: var(--card); border-radius: var(--radius); padding: 32px; }
+  .fig dt { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .fig dd { margin: 0; font-size: var(--h2); font-weight: 600; color: var(--heading); font-variant-numeric: tabular-nums; }
+  .fig .sub { font-size: var(--p4); color: var(--muted); margin-top: 12px; }
+  .prose { display: flex; flex-direction: column; gap: 20px; margin-top: 48px; }
+  .prose p { font-size: var(--p3); color: var(--body); line-height: 1.6; max-width: 78ch; }
+  .prose strong { color: var(--heading); font-weight: 600; }
 
-  /* ── live figures ────────────────────────────────────────────────── */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); }
-  .stat { background: var(--bg); padding: 22px 20px; }
-  .stat dt { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 10px; }
-  .stat dd { margin: 0; font-family: var(--mono); font-size: clamp(20px, 2.6vw, 27px); font-variant-numeric: tabular-nums; }
-  .stat .unit { font-size: 13px; color: var(--ink-3); margin-left: 5px; font-family: 'Space Grotesk', sans-serif; }
-  .stat .foot { font-size: 12.5px; color: var(--ink-3); margin-top: 8px; font-family: 'Space Grotesk', sans-serif; }
-  @media (max-width: 860px) { .stats { grid-template-columns: repeat(2, 1fr); } }
-
-
-  /* ── verifier ────────────────────────────────────────────────────── */
-  .verify { margin-top: 36px; border: 1px solid var(--line); }
-  .verify-out { padding: 20px 22px; font-family: var(--mono); font-size: 13px; color: var(--ink-2); white-space: pre-wrap; margin: 0; min-height: 84px; }
-  .verify-out .pass { color: var(--ok); }
-  .verify-out .fail { color: var(--accent); }
-
-  /* ── setup / agent picker ────────────────────────────────────────── */
-  .tabs { display: flex; flex-wrap: wrap; gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); }
-  .tab {
-    flex: 1 1 auto; min-width: 112px; background: var(--bg); color: var(--ink-2);
-    font: inherit; font-size: 13.5px; font-weight: 500; padding: 13px 10px;
-    border: 0; cursor: pointer; text-align: center;
-  }
-  .tab:hover { color: var(--ink); background: var(--bg-2); }
-  .tab[aria-selected="true"] { color: var(--ink); background: var(--bg-2); box-shadow: inset 0 -2px 0 var(--accent); }
-  .panel { border: 1px solid var(--line); border-top: 0; padding: 26px 22px; }
-  .panel[hidden] { display: none; }
-  .panel h3 { font-size: 15px; font-family: 'Space Grotesk', sans-serif; font-weight: 600; margin: 0 0 6px; }
-  .panel .note { color: var(--ink-2); font-size: 14px; margin: 0 0 18px; }
-  .panel .note code { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
-  .step { color: var(--ink-3); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; margin: 22px 0 8px; }
-  .step:first-of-type { margin-top: 0; }
-
-  pre {
-    margin: 0; padding: 16px 46px 16px 16px; overflow-x: auto;
-    background: var(--bg-2); border: 1px solid var(--line);
-    font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: var(--ink);
-    position: relative;
-  }
+  /* ── code blocks ──────────────────────────────────────────────────────── */
   .code { position: relative; }
-  .copy {
-    position: absolute; top: 8px; right: 8px;
-    background: var(--bg); border: 1px solid var(--line-2); color: var(--ink-2);
-    font: inherit; font-size: 11px; padding: 4px 8px; border-radius: 2px; cursor: pointer;
+  pre {
+    margin: 0; padding: 24px 88px 24px 24px; overflow-x: auto;
+    background: var(--raised); border-radius: var(--radius);
+    font-family: inherit; font-size: var(--p4); line-height: 1.65; color: var(--heading);
   }
-  .copy:hover { color: var(--ink); border-color: var(--ink-3); }
+  .copy {
+    position: absolute; top: 12px; right: 12px; height: 32px; padding: 0 12px;
+    border-radius: 8px; border: 1px solid var(--elevated); background: var(--card);
+    color: var(--body); font: inherit; font-size: var(--l5); cursor: pointer;
+  }
+  .copy:hover { color: var(--heading); background: var(--elevated); }
 
-  /* ── footer ──────────────────────────────────────────────────────── */
-  footer { padding: 56px 0 72px; }
-  .foot-in { display: flex; flex-wrap: wrap; gap: 32px; justify-content: space-between; align-items: flex-start; }
-  .foot-col h4 { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 14px; font-family: 'Space Grotesk', sans-serif; font-weight: 600; }
-  .foot-col a { display: block; color: var(--ink-2); text-decoration: none; font-size: 14px; padding: 3px 0; }
-  .foot-col a:hover { color: var(--ink); }
-  .foot-note { color: var(--ink-3); font-size: 13px; margin: 40px 0 0; max-width: 70ch; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* ── setup tabs ───────────────────────────────────────────────────────── */
+  .tabs { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 24px; }
+  .tab {
+    height: 48px; padding: 0 24px; border-radius: var(--radius);
+    background: var(--card); border: 1px solid transparent; color: var(--muted);
+    font: inherit; font-size: var(--l4); font-weight: 600; cursor: pointer;
+  }
+  .tab:hover { color: var(--heading); background: var(--raised); }
+  .tab[aria-selected="true"] { background: var(--raised); color: var(--heading); border-color: var(--action); }
+  .panel { background: var(--card); border-radius: var(--radius); padding: 32px; }
+  .panel[hidden] { display: none; }
+  .panel h4 { margin-bottom: 12px; }
+  .panel .note { font-size: var(--p4); color: var(--muted); line-height: 1.6; margin-bottom: 24px; max-width: 88ch; }
+  .step { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 24px 0 10px; }
+  .panel > .step:first-of-type { margin-top: 0; }
+
+  /* ── footer ───────────────────────────────────────────────────────────── */
+  footer { padding: 64px 0 96px; }
+  .foot { display: flex; flex-wrap: wrap; gap: 48px; justify-content: space-between; }
+  .foot h5 { margin: 0 0 16px; font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .foot a { display: block; padding: 4px 0; font-size: var(--p4); color: var(--body); text-decoration: none; }
+  .foot a:hover { color: var(--heading); }
+  .fine { margin-top: 48px; font-size: var(--p4); color: var(--muted); line-height: 1.6; max-width: 90ch; }
 </style>
 </head>
 <body>
 
-<!-- The mark, defined once and referenced wherever the wordmark appears. The ring is
-     open at the top and a chevron sits in the gap — an O that points up, for an agent
-     whose only question is whether a window closes above or below its reference. -->
+<!-- The mark, defined once. A ring open at the top with a chevron in the gap: an O that
+     points up, for an agent whose only question is whether a window closes above or below
+     its reference level. Inline SVG so it scales and inherits colour. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="mark" viewBox="0 0 100 100">
     <path d="M27 17 A40 40 0 1 0 73 17" fill="none" stroke="currentColor" stroke-width="11" />
@@ -167,9 +178,7 @@
 
 <nav>
   <div class="wrap nav-in">
-    <a class="brand" href="/" aria-label="Somnus home">
-      <span class="wordmark">S<svg class="mark" aria-hidden="true"><use href="#mark"/></svg>MNUS</span>
-    </a>
+    <a class="wordmark" href="#top" aria-label="Somnus">S<svg class="mark" aria-hidden="true"><use href="#mark"/></svg>MNUS</a>
     <div class="nav-links">
       <a href="#record" class="hide-sm">Record</a>
       <a href="#verify" class="hide-sm">Verify</a>
@@ -179,207 +188,232 @@
   </div>
 </nav>
 
-<header>
-  <div class="wrap">
-    <p class="eyebrow">Somnia Shannon testnet · DreamDEX Event Contracts</p>
+<div class="hero" id="top">
+  <canvas id="bg" aria-hidden="true"></canvas>
+  <div class="fade fade-top"></div>
+  <div class="fade fade-bot"></div>
+  <div class="hero-in">
+    <p class="kicker">Somnia Shannon testnet · DreamDEX Event Contracts</p>
     <h1>An agent that can prove what it did.</h1>
     <p class="sub">
       Somnus reads live order books, forms its own probability estimates, and trades inside hard
-      limits you set. Every decision, order and rule change is written to a signed hash chain —
-      so you never have to take its word for anything, including the losses.
+      limits. Every decision, order and rule change goes into a signed hash chain — so you never
+      have to take its word for anything, including the losses.
     </p>
-    <div class="cta-row">
+    <div class="hero-cta">
       <a class="btn btn-primary" href="#setup">
         Connect your coding agent
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
       </a>
-      <a class="btn" href="https://github.com/zachbuilds26/somnus">Read the source</a>
+      <a class="btn btn-ghost" href="https://github.com/zachbuilds26/somnus">Read the source</a>
     </div>
   </div>
-</header>
+</div>
 
-<section>
+<section class="band">
   <div class="wrap">
-    <p class="eyebrow">What it does</p>
-    <h2>Three things, and it will show you the evidence for all of them.</h2>
-    <div class="cards">
+    <div class="band-head">
+      <p class="kicker">What it does</p>
+      <h2>Three things, and it shows the evidence for all of them.</h2>
+    </div>
+    <div class="grid">
       <div class="card">
-        <h3>Prices its own opinion</h3>
-        <p>
-          Driftless GBM with horizon-matched volatility, not naive sqrt-scaling. It compares that
-          to the book and acts only where there is genuine edge — which most cycles means not at all.
-        </p>
-        <a class="card-act" href="#record">
-          See its record
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-        </a>
+        <div class="card-top">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 17.5 8 11l4 3.5L21 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M15 5h6v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 21h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <div class="card-txt">
+            <h4>Prices its own opinion</h4>
+            <p>
+              Driftless GBM with horizon-matched volatility, not naive sqrt-scaling. It compares
+              that to the book and acts only where there is genuine edge — which most cycles means
+              not at all.
+            </p>
+          </div>
+        </div>
+        <a class="btn" href="#record">See its record</a>
       </div>
       <div class="card">
-        <h3>Trusts only what it measured</h3>
-        <p>
-          Each window length is scored against its own base rate. One-minute windows are blocked
-          outright — 3,110 samples said they were no better than a coin flip.
-        </p>
-        <a class="card-act" href="https://somnus-backend.onrender.com/api/agent/horizons">
-          Open the tier table
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-        </a>
+        <div class="card-top">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <div class="card-txt">
+            <h4>Trusts only what it measured</h4>
+            <p>
+              Each window length is scored against its own base rate. One-minute windows are
+              blocked outright — 3,110 samples said they were no better than a coin flip.
+            </p>
+          </div>
+        </div>
+        <a class="btn" href="https://somnus-backend.onrender.com/api/agent/horizons">Open the tier table</a>
       </div>
       <div class="card">
-        <h3>Refuses on its own terms</h3>
-        <p>
-          Daily loss, drawdown, loss streak, execution failures, stale data, clock drift, a dead
-          book feed. Enforced server-side, and the reason is always recorded.
-        </p>
-        <a class="card-act" href="https://somnus-backend.onrender.com/api/health">
-          Read live health
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-        </a>
+        <div class="card-top">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3l8 3.5v5c0 4.5-3.2 8.4-8 9.5-4.8-1.1-8-5-8-9.5v-5L12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <div class="card-txt">
+            <h4>Refuses on its own terms</h4>
+            <p>
+              Daily loss, drawdown, loss streak, execution failures, stale data, clock drift, a
+              dead book feed. Enforced server-side, and the reason is always recorded.
+            </p>
+          </div>
+        </div>
+        <a class="btn" href="https://somnus-backend.onrender.com/api/health">Read live health</a>
       </div>
     </div>
   </div>
 </section>
 
-<section id="record">
+<section class="band" id="record">
   <div class="wrap">
-    <p class="eyebrow">The record · snapshot, 5 September 2026</p>
-    <h2>It is not profitable. Here is the number, and here is why.</h2>
-    <p class="lede">
-      This page is static, so the figures below are a dated snapshot rather than a live read — the
-      links under them go to the running agent, which is the copy to believe if the two ever
-      disagree.
-    </p>
+    <div class="band-head">
+      <p class="kicker">The record · snapshot, 5 September 2026</p>
+      <h2>It is not profitable. Here is the number, and here is why.</h2>
+      <p>
+        This page is static, so these are a dated snapshot. The links below go to the running
+        agent, which is the copy to believe if the two ever disagree.
+      </p>
+    </div>
 
-    <dl class="stats">
-      <div class="stat"><dt>Settled trades</dt><dd>76</dd><div class="foot">28 won, 48 lost</div></div>
-      <div class="stat"><dt>Win rate</dt><dd>36.8%</dd><div class="foot">a coin flip is 50%</div></div>
-      <div class="stat"><dt>Realised P&amp;L</dt><dd>-3,196.65</dd><div class="foot">tUSDC, testnet</div></div>
-      <div class="stat"><dt>Signed entries</dt><dd>2,885</dd><div class="foot">hash-linked</div></div>
+    <dl class="figs">
+      <div class="fig"><dt>Settled trades</dt><dd>76</dd><p class="sub">28 won, 48 lost</p></div>
+      <div class="fig"><dt>Win rate</dt><dd>36.8%</dd><p class="sub">a coin flip is 50%</p></div>
+      <div class="fig"><dt>Realised P&amp;L</dt><dd>-3,196.65</dd><p class="sub">tUSDC, testnet</p></div>
+      <div class="fig"><dt>Signed entries</dt><dd>2,885</dd><p class="sub">hash-linked</p></div>
     </dl>
 
-    <p class="lede" style="margin-top:34px">
-      <strong>Roughly 95% of that loss is four trades.</strong> On 30 August, inside ninety seconds,
-      Somnus placed four orders of about 1,000 tUSDC each against a 1,000 ceiling. They cost 3,999
-      and returned 990. The other 72 fills risked 449 between them and came out close to flat.
-    </p>
-    <p class="lede">
-      Two bugs, both caught by this repository's own instrumentation and both fixed. Exposure was
-      compared against a counter held in memory rather than positions actually on-chain, so four
-      orders fitted inside a ceiling meant for one. And cost basis was recorded against the
-      <em>requested</em> size: the first of those trades asked for 1,976 contracts, filled 990, and
-      was booked at 999.86 — a position that cost about 501, paid out 990, and <strong>won</strong>,
-      written into the ledger as a loss.
-    </p>
-    <p class="lede">
-      The per-trade cap is 2 tUSDC now and exposure is read from the chain. The reason those two
-      bugs can be described this precisely is the record the loss is stored in — so the number
-      stays. One that looked better and could not be interrogated would be worth less.
-    </p>
-    <div class="cta-row">
-      <a class="btn" href="https://somnus-backend.onrender.com/api/agent/pnl">Raw P&amp;L JSON</a>
-      <a class="btn" href="https://somnus-backend.onrender.com/api/agent/report">Full report by horizon and tier</a>
+    <div class="prose">
+      <p>
+        <strong>Roughly 95% of that loss is four trades.</strong> On 30 August, inside ninety
+        seconds, Somnus placed four orders of about 1,000 tUSDC each against a 1,000 ceiling. They
+        cost 3,999 and returned 990. The other 72 fills risked 449 between them and came out close
+        to flat.
+      </p>
+      <p>
+        Two bugs, both caught by this repository's own instrumentation and both fixed. Exposure was
+        compared against a counter held in memory rather than positions actually on-chain, so four
+        orders fitted inside a ceiling meant for one. And cost basis was recorded against the
+        <em>requested</em> size: the first of those trades asked for 1,976 contracts, filled 990,
+        and was booked at 999.86 — a position that cost about 501, paid out 990, and
+        <strong>won</strong>, written into the ledger as a loss.
+      </p>
+      <p>
+        The per-trade cap is 2 tUSDC now and exposure is read from the chain. The reason those two
+        bugs can be described this precisely is the record the loss is stored in — so the number
+        stays. One that looked better and could not be interrogated would be worth less.
+      </p>
+    </div>
+    <div class="hero-cta" style="justify-content:flex-start;margin-top:32px">
+      <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/agent/pnl">Raw P&amp;L JSON</a>
+      <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/agent/report">Full report</a>
     </div>
   </div>
 </section>
 
-<section id="verify">
+<section class="band" id="verify">
   <div class="wrap">
-    <p class="eyebrow">Verify</p>
-    <h2>Do not trust the numbers above. Check them yourself.</h2>
-    <p class="lede">
-      Every entry carries the hash of the one before it, so nothing can be reordered or removed
-      without breaking the chain, and most are signed with the wallet that placed the trades. The
-      endpoint needs no key — an audit that requires the operator's secret is not an audit — so this
-      command works from your terminal right now.
-    </p>
+    <div class="band-head">
+      <p class="kicker">Verify</p>
+      <h2>Do not trust the numbers above. Check them yourself.</h2>
+      <p>
+        Every entry carries the hash of the one before it, and most are signed by the wallet that
+        placed the trades. The endpoint takes no key — an audit that needs the operator's secret is
+        not an audit — so this works from your terminal right now.
+      </p>
+    </div>
 
-    <div class="code" style="margin-top:32px">
+    <div class="code">
 <pre>curl -s -X POST https://somnus-backend.onrender.com/api/proof/verify \
   -H 'content-type: application/json' -d '{}'</pre>
       <button class="copy" type="button">Copy</button>
     </div>
 
     <p class="step">What it answered on 5 September 2026</p>
-    <div class="verify">
-<pre class="verify-out">linkage, every entry          <span class="pass">PASS</span>   2,885 checked
-recomputed head matches       <span class="pass">PASS</span>
-signatures valid              <span class="pass">PASS</span>   400 of 400
+    <pre>linkage, every entry          PASS    2,885 checked
+recomputed head matches       PASS
+signatures valid              PASS    400 of 400
 older signatures out of scope 2,399 — pageable
 unsigned historical entries   152 — reported, not hidden
 signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
-    </div>
 
-    <p class="lede" style="margin-top:26px">
-      Signature recovery costs about 36 ms an entry, so one request checks linkage over everything
-      and signatures over the most recent 400, reporting exactly what it skipped. That limit exists
-      because leaving it off made a single anonymous request cost 78 seconds of CPU — found while
-      auditing this project, and fixed rather than hidden.
-    </p>
-    <div class="cta-row">
-      <a class="btn" href="https://somnus-backend.onrender.com/api/proof">Browse the chain</a>
+    <div class="prose">
+      <p>
+        Signature recovery costs about 36 ms an entry, so one request checks linkage over
+        everything and signatures over the most recent 400, reporting exactly what it skipped. That
+        limit exists because leaving it off made a single anonymous request cost 78 seconds of CPU —
+        found while auditing this project, and fixed rather than hidden.
+      </p>
+    </div>
+    <div class="hero-cta" style="justify-content:flex-start;margin-top:32px">
+      <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/proof">Browse the chain</a>
     </div>
   </div>
 </section>
 
-<section id="setup">
+<section class="band" id="setup">
   <div class="wrap">
-    <p class="eyebrow">Set up · about 30 seconds</p>
-    <h2>There is no dashboard. Your coding agent is the interface.</h2>
-    <p class="lede">
-      Somnus speaks <a href="https://modelcontextprotocol.io">MCP</a>, so you point whatever you
-      already code in at one URL and then ask it questions in English — <em>is it trading right
-      now, and what's blocking it?</em> Twelve read-only tools need no credential at all.
-    </p>
-    <p class="lede">
-      Add an <code class="mono">x-somnus-token</code> header and seven more appear, backed by a
-      wallet derived from that token — <code class="mono">HMAC(server secret, your token)</code>, so
-      the same token always returns the same wallet and none of it is stored. Use a long random
-      string and keep it like a password, because it is the only thing that controls the wallet.
-      Testnet only.
-    </p>
+    <div class="band-head">
+      <p class="kicker">Set up · about 30 seconds</p>
+      <h2>There is no dashboard. Your coding agent is the interface.</h2>
+      <p>
+        Somnus speaks <a href="https://modelcontextprotocol.io">MCP</a>, so you point whatever you
+        already code in at one URL and ask in English. Twelve read-only tools need no credential.
+        Add an <code>x-somnus-token</code> header and seven more appear, backed by a wallet derived
+        from that token — the same token always returns the same wallet, and none of it is stored.
+        Use a long random string and keep it like a password. Testnet only.
+      </p>
+    </div>
 
     <div class="tabs" role="tablist" aria-label="Choose your coding agent"></div>
     <div id="panels"></div>
 
-    <p class="lede" style="margin-top:26px">
-      Not listed, or your build only speaks stdio? Every client below is really just pointing at
-      <code class="mono">https://somnus-backend.onrender.com/mcp</code>. For one that cannot do HTTP
-      directly, bridge it: <code class="mono">npx -y mcp-remote https://somnus-backend.onrender.com/mcp</code>.
-    </p>
+    <div class="prose">
+      <p>
+        Every one of these is really just pointing at
+        <code>https://somnus-backend.onrender.com/mcp</code>. For a client that only speaks stdio,
+        bridge it: <code>npx -y mcp-remote https://somnus-backend.onrender.com/mcp</code>.
+      </p>
+    </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <div class="foot-in">
+    <div class="foot">
       <div>
-        <span class="wordmark" style="font-size:17px">S<svg class="mark" aria-hidden="true"><use href="#mark"/></svg>MNUS</span>
-        <p class="foot-note" style="margin-top:14px;max-width:34ch">
+        <span class="wordmark">S<svg class="mark" aria-hidden="true"><use href="#mark"/></svg>MNUS</span>
+        <p class="fine" style="margin-top:16px;max-width:32ch">
           Built for the Somnia × DreamDEX Event Contracts hackathon. Testnet only.
         </p>
       </div>
-      <div class="foot-col">
-        <h4>Live endpoints</h4>
+      <div>
+        <h5>Live endpoints</h5>
         <a href="https://somnus-backend.onrender.com/api/health">Health</a>
         <a href="https://somnus-backend.onrender.com/api/agent/pnl">P&amp;L</a>
         <a href="https://somnus-backend.onrender.com/api/agent/horizons">Horizon tiers</a>
         <a href="https://somnus-backend.onrender.com/api/proof">Proof chain</a>
         <a href="https://somnus-backend.onrender.com/metrics">Metrics</a>
       </div>
-      <div class="foot-col">
-        <h4>Project</h4>
+      <div>
+        <h5>Project</h5>
         <a href="https://github.com/zachbuilds26/somnus">Source</a>
         <a href="https://github.com/zachbuilds26/somnus#readme">README</a>
-        <a href="https://github.com/zachbuilds26/somnus/commits/master">Commit history</a>
+        <a href="https://github.com/zachbuilds26/somnus/commits/master">Commits</a>
       </div>
-      <div class="foot-col">
-        <h4>Somnia</h4>
+      <div>
+        <h5>Somnia</h5>
         <a href="https://testnet.somnia.network/">Shannon testnet</a>
         <a href="https://cloud.google.com/application/web3/faucet/somnia/shannon">STT faucet</a>
         <a href="https://discord.com/invite/somnia">Discord</a>
       </div>
     </div>
-    <p class="foot-note">
+    <p class="fine">
       Nothing here is financial advice and none of it is real money. The per-user wallets are
       custodial by construction — this server can recompute any token's key, which is acceptable
       only because these are faucet-funded testnet balances. Do not point it at mainnet, and do not
@@ -389,21 +423,75 @@ signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
 </footer>
 
 <script>
-/* This page is STATIC. It reads nothing from the agent and calls no API — every figure on
-   it is a dated snapshot, and the links go to the running service for anyone who wants the
-   current numbers. The only JavaScript here renders the setup picker and the copy buttons.
+/* This page is STATIC. It reads nothing from the agent and calls no API — every figure is a
+   dated snapshot and the links go to the running service. The only JavaScript here draws
+   the hero backdrop, renders the setup picker, and handles the copy buttons. */
 
-   ── setup, per agent ────────────────────────────────────────────────────────
-   Formats verified against each vendor's own docs rather than assumed, because they
-   differ in ways that fail silently: Windsurf and Antigravity want `serverUrl` where
-   everyone else wants `url`, Cline needs `streamableHttp` in camelCase or it falls back to
-   SSE and 405s, VS Code wants `servers` rather than `mcpServers`. A config copied between
-   two of these does not work.                                                        */
+/* ── hero backdrop ──────────────────────────────────────────────────────────
+   The reference site puts a <canvas> behind its hero. This is the same idea in a few
+   lines: a slow drift of points, one connecting line where two are close. Deliberately
+   dim and slow — a backdrop that competes with the headline has failed at its job.
+   Respects prefers-reduced-motion by drawing a single static frame instead.            */
+(() => {
+  const cv = document.getElementById('bg');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let pts = [], w = 0, h = 0, raf = 0;
+
+  const size = () => {
+    const r = Math.min(devicePixelRatio || 1, 2);
+    w = cv.clientWidth; h = cv.clientHeight;
+    cv.width = Math.floor(w * r); cv.height = Math.floor(h * r);
+    ctx.setTransform(r, 0, 0, r, 0, 0);
+    /* Count scales with area so a phone does not run a laptop's particle budget. */
+    const n = Math.max(18, Math.min(70, Math.round((w * h) / 26000)));
+    pts = Array.from({ length: n }, () => ({
+      x: Math.random() * w, y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.16, vy: (Math.random() - 0.5) * 0.16,
+    }));
+  };
+
+  const frame = () => {
+    ctx.clearRect(0, 0, w, h);
+    for (const p of pts) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0 || p.x > w) p.vx *= -1;
+      if (p.y < 0 || p.y > h) p.vy *= -1;
+    }
+    ctx.lineWidth = 1;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > 20000) continue;
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.05 * (1 - d2 / 20000)).toFixed(3) + ')';
+        ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
+      }
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.20)';
+    for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y, 1.1, 0, 6.2832); ctx.fill(); }
+    raf = requestAnimationFrame(frame);
+  };
+
+  size();
+  if (still) frame(), cancelAnimationFrame(raf);
+  else frame();
+  addEventListener('resize', () => { cancelAnimationFrame(raf); size(); still ? frame() : frame(); });
+})();
+
+/* ── setup, five agents ─────────────────────────────────────────────────────
+   Formats checked against each vendor's own docs rather than assumed, because they differ
+   in ways that fail SILENTLY. Antigravity and Windsurf want `serverUrl`; everyone else
+   wants `url`. Cline needs `streamableHttp` in exactly that casing or it falls back to SSE
+   and answers 405. Codex is TOML. A config copied between any two of these does not work,
+   so each panel names the trap it avoids.                                              */
 const MCP = 'https://somnus-backend.onrender.com/mcp';
+
 const AGENTS = [
   {
     id: 'claude', name: 'Claude Code',
-    note: 'One command. Add <code>--header</code> only if you want the wallet tools.',
+    note: 'One command, no file to edit. Add the header only if you want the wallet tools.',
     steps: [
       ['Read-only', 'claude mcp add --transport http somnus ' + MCP],
       ['With your own wallet', 'claude mcp add --transport http somnus ' + MCP + ' \\\n  --header "x-somnus-token: $(openssl rand -hex 24)"'],
@@ -411,18 +499,26 @@ const AGENTS = [
     ],
   },
   {
+    id: 'cursor', name: 'Cursor',
+    note: 'Global at <code>~/.cursor/mcp.json</code>, or <code>.cursor/mcp.json</code> to scope it to one project.',
+    steps: [
+      ['~/.cursor/mcp.json', '{\n  "mcpServers": {\n    "somnus": {\n      "url": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
+    ],
+  },
+  {
     id: 'codex', name: 'Codex CLI',
-    note: 'TOML, not JSON. Edit <code>~/.codex/config.toml</code> — the CLI and the IDE extension share it.',
+    note: 'TOML, not JSON. The CLI and the IDE extension share <code>~/.codex/config.toml</code>.',
     steps: [
       ['~/.codex/config.toml', '[mcp_servers.somnus]\nurl = "' + MCP + '"\nhttp_headers = { "x-somnus-token" = "<a long random string>" }'],
       ['Read-only instead', '[mcp_servers.somnus]\nurl = "' + MCP + '"'],
     ],
   },
   {
-    id: 'cursor', name: 'Cursor',
-    note: 'Global file <code>~/.cursor/mcp.json</code>, or <code>.cursor/mcp.json</code> for one project.',
+    id: 'antigravity', name: 'Antigravity',
+    note: 'Uses <code>serverUrl</code>, not <code>url</code> — with <code>url</code> it fails with <em>"serverUrl or command must be specified"</em>. Reach the file from the Agent panel: <code>…</code> → MCP Servers → Manage MCP Servers → View raw config, then relaunch.',
     steps: [
-      ['~/.cursor/mcp.json', '{\n  "mcpServers": {\n    "somnus": {\n      "url": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
+      ['~/.gemini/antigravity/mcp_config.json', '{\n  "mcpServers": {\n    "somnus": {\n      "serverUrl": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
+      ['Windows path', '%USERPROFILE%\\.gemini\\antigravity\\mcp_config.json'],
     ],
   },
   {
@@ -432,70 +528,21 @@ const AGENTS = [
       ['cline_mcp_settings.json', '{\n  "mcpServers": {\n    "somnus": {\n      "type": "streamableHttp",\n      "url": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
     ],
   },
-  {
-    id: 'windsurf', name: 'Windsurf',
-    note: 'Windsurf uses <code>serverUrl</code>, not <code>url</code> — a config copied from Cursor connects to nothing and says little about why. File: <code>~/.codeium/windsurf/mcp_config.json</code>.',
-    steps: [
-      ['mcp_config.json', '{\n  "mcpServers": {\n    "somnus": {\n      "serverUrl": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
-    ],
-  },
 ];
 
-AGENTS.push(
-  {
-    id: 'vscode', name: 'VS Code',
-    note: 'Copilot agent mode. Note the key is <code>servers</code>, not <code>mcpServers</code>. Put it in <code>.vscode/mcp.json</code> to share with a repo.',
-    steps: [
-      ['.vscode/mcp.json', '{\n  "servers": {\n    "somnus": {\n      "type": "http",\n      "url": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
-    ],
-  },
-  {
-    id: 'antigravity', name: 'Antigravity',
-    note: 'Google\'s agentic IDE. Uses <code>serverUrl</code>, not <code>url</code> — with <code>url</code> it fails with <em>"serverUrl or command must be specified"</em>. Open it from the Agent panel: <code>…</code> → MCP Servers → Manage MCP Servers → View raw config, then relaunch the app.',
-    steps: [
-      ['~/.gemini/antigravity/mcp_config.json', '{\n  "mcpServers": {\n    "somnus": {\n      "serverUrl": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
-      ['Windows path', '%USERPROFILE%\\.gemini\\antigravity\\mcp_config.json'],
-      ['Read-only instead', '{\n  "mcpServers": {\n    "somnus": { "serverUrl": "' + MCP + '" }\n  }\n}'],
-    ],
-  },
-  {
-    id: 'opencode', name: 'OpenCode',
-    note: 'Top-level <code>mcp</code> key with <code>"type": "remote"</code>. Header values support <code>{env:VAR}</code>, so the token need not sit in the file.',
-    steps: [
-      ['opencode.json', '{\n  "$schema": "https://opencode.ai/config.json",\n  "mcp": {\n    "somnus": {\n      "type": "remote",\n      "url": "' + MCP + '",\n      "enabled": true,\n      "headers": { "x-somnus-token": "{env:SOMNUS_TOKEN}" }\n    }\n  }\n}'],
-      ['then', 'export SOMNUS_TOKEN=$(openssl rand -hex 24)'],
-    ],
-  },
-  {
-    id: 'groq', name: 'Groq',
-    note: 'Not an editor — Groq calls MCP servers <em>server-side</em>, so you pass the URL in the request and the API runs the tools for you. No local install at all.',
-    steps: [
-      ['Responses API', 'curl -X POST "https://api.groq.com/openai/v1/responses" \\\n  -H "Authorization: Bearer $GROQ_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{\n    "model": "openai/gpt-oss-120b",\n    "input": "Is somnus trading, and can it prove its last trade?",\n    "tools": [{\n      "type": "mcp",\n      "server_label": "somnus",\n      "server_url": "' + MCP + '",\n      "require_approval": "never"\n    }]\n  }\''],
-    ],
-  },
-  {
-    id: 'zed', name: 'Zed',
-    note: 'Zed calls them context servers. Settings are JSON with comments allowed.',
-    steps: [
-      ['settings.json', '{\n  "context_servers": {\n    "somnus": {\n      "source": "custom",\n      "command": "npx",\n      "args": ["-y", "mcp-remote", "' + MCP + '"]\n    }\n  }\n}'],
-      ['Why the bridge', '# Zed speaks stdio, so mcp-remote turns the hosted HTTP\n# endpoint into a local stdio server. Same tools, one extra hop.'],
-    ],
-  },
-);
-
-/* Render the picker. Built in JS rather than written out nine times so the URL and the
-   token placeholder are defined once — nine hand-copied blocks is nine chances for one to
-   drift after a rename. */
+/* Rendered from the array rather than written out five times, so the URL and the token
+   placeholder are defined once — five hand-copied blocks is five chances for one to drift
+   after a rename. */
 const tabsEl = document.querySelector('.tabs');
-const panelsEl = el('panels');
+const panelsEl = document.getElementById('panels');
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 AGENTS.forEach((a, i) => {
   const tab = document.createElement('button');
   tab.className = 'tab';
   tab.type = 'button';
-  tab.setAttribute('role', 'tab');
   tab.id = 'tab-' + a.id;
+  tab.setAttribute('role', 'tab');
   tab.setAttribute('aria-controls', 'panel-' + a.id);
   tab.setAttribute('aria-selected', String(i === 0));
   tab.textContent = a.name;
@@ -508,13 +555,11 @@ AGENTS.forEach((a, i) => {
   panel.setAttribute('aria-labelledby', 'tab-' + a.id);
   panel.hidden = i !== 0;
   panel.innerHTML =
-    '<h3>' + a.name + '</h3><p class="note">' + a.note + '</p>' +
+    '<h4>' + a.name + '</h4><p class="note">' + a.note + '</p>' +
     a.steps
-      .map(
-        ([label, code]) =>
-          '<p class="step">' + esc(label) + '</p><div class="code"><pre>' + esc(code) +
-          '</pre><button class="copy" type="button">Copy</button></div>',
-      )
+      .map(([label, code]) =>
+        '<p class="step">' + esc(label) + '</p><div class="code"><pre>' + esc(code) +
+        '</pre><button class="copy" type="button">Copy</button></div>')
       .join('');
   panelsEl.appendChild(panel);
 
@@ -524,10 +569,10 @@ AGENTS.forEach((a, i) => {
   });
 });
 
-/* One listener for every Copy button on the page, present and future — bound to the
-   document rather than to the setup panels, because the verify section has one too and a
-   handler scoped to the panels would have left it inert. Reports its outcome on the button
-   itself: a control that silently may or may not have worked is worse than none. */
+/* One listener for every Copy button on the page — bound to the document rather than to the
+   setup panels, because the verify section has one too and a panel-scoped handler would
+   have left it inert. Reports its outcome on the button: a control that silently may or may
+   not have worked is worse than none. */
 document.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('.copy');
   if (!btn) return;
@@ -537,13 +582,13 @@ document.addEventListener('click', async (ev) => {
     await navigator.clipboard.writeText(pre.textContent);
     btn.textContent = 'Copied';
   } catch {
-    /* Clipboard needs a secure context and permission; select the text instead of lying. */
+    /* Clipboard needs HTTPS and permission. Select the text rather than claim success. */
     const r = document.createRange();
     r.selectNodeContents(pre);
     const sel = getSelection();
     sel.removeAllRanges();
     sel.addRange(r);
-    btn.textContent = 'Selected — press Ctrl+C';
+    btn.textContent = 'Press Ctrl+C';
   }
   setTimeout(() => (btn.textContent = 'Copy'), 2200);
 });
