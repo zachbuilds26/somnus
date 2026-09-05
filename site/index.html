@@ -13,10 +13,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M27 17 A40 40 0 1 0 73 17' fill='none' stroke='white' stroke-width='11'/%3E%3Cpath d='M33 27 L50 10 L67 27 L58 27 L50 18 L42 27 Z' fill='%23FF0088'/%3E%3C/svg%3E" />
 <style>
-  /* Tokens taken from testnet.somnia.network's own stylesheet so this sits beside it
-     rather than merely near it: --surface-default #141414, --surface-raised #1c1c1c,
-     --radius .75rem, Source Code Pro throughout, 40/32/24/20px headings. Their action
-     colour (#5c16cc, purple) is the one deliberate substitution — Somnus is #FF0088. */
+  /* Tokens taken from testnet.somnia.network's own stylesheet: --surface-default #141414,
+     --surface-raised #1c1c1c, --radius .75rem, Source Code Pro throughout. Their action
+     colour (#5c16cc, purple) is the one deliberate substitution — Somnus is #FF0088.
+
+     The type SCALE is not copied, and that is deliberate. Their 40/32/24/20 ladder is set
+     in a proportional font; Source Code Pro is monospace, so every glyph is the width of
+     the widest one and the same pixel size reads noticeably larger and wider. Lifting the
+     numbers straight across is what made the first attempt feel oversized. These are the
+     same ladder brought down a step and made fluid, so it holds from a phone to a wide
+     display instead of jumping at one breakpoint. */
   :root {
     --page: #000;
     --card: #141414;
@@ -28,9 +34,15 @@
     --action: #FF0088;
     --action-hover: #d9006f;
     --radius: 0.75rem;
-    --h1: 40px; --h2: 32px; --h3: 24px; --h4: 20px;
-    --p1: 20px; --p3: 16px; --p4: 14px;
-    --l4: 14px; --l5: 12px;
+    --h1: clamp(25px, 4.1vw, 42px);
+    --h2: clamp(20px, 2.5vw, 27px);
+    --h3: clamp(17px, 1.8vw, 20px);
+    --h4: clamp(15px, 1.5vw, 17px);
+    --p1: clamp(14.5px, 1.4vw, 17px);
+    --p3: 15px;
+    --p4: 13px;
+    --l4: 13.5px; --l5: 11.5px;
+    --band: clamp(56px, 7.5vw, 88px);
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
@@ -43,27 +55,31 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3, h4 { color: var(--heading); font-weight: 600; line-height: 1; margin: 0; }
-  h1 { font-size: var(--h1); }
-  h2 { font-size: var(--h2); }
+  h1, h2, h3, h4 { color: var(--heading); font-weight: 600; line-height: 1.1; margin: 0; }
+  h1 { font-size: var(--h1); letter-spacing: -0.015em; }
+  h2 { font-size: var(--h2); letter-spacing: -0.01em; }
   h3 { font-size: var(--h3); }
   h4 { font-size: var(--h4); }
   p { margin: 0; }
   a { color: inherit; }
   code { font-family: inherit; color: var(--heading); }
-  .wrap { width: 100%; max-width: 1360px; margin: 0 auto; padding: 0 24px; }
+  .wrap { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 clamp(20px, 4vw, 40px); }
   :focus-visible { outline: 2px solid rgba(255,255,255,0.28); outline-offset: 2px; }
-  @media (max-width: 640px) { :root { --h1: 30px; --h2: 24px; --h3: 20px; --p1: 17px; } }
 
   /* ── nav: 64px bar, logo left, links right ───────────────────────────── */
-  nav { position: sticky; top: 0; z-index: 30; height: 64px; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); }
+  nav { position: sticky; top: 0; z-index: 30; height: 64px; background: rgba(0,0,0,0.82); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255,255,255,0.06); }
   .nav-in { height: 64px; display: flex; align-items: center; justify-content: space-between; }
   .wordmark {
-    display: inline-flex; align-items: center; font-weight: 700; font-size: var(--h4);
-    letter-spacing: 0.04em; color: var(--heading); text-decoration: none;
+    display: inline-flex; align-items: center; gap: 1px;
+    font-weight: 700; font-size: clamp(15px, 1.6vw, 18px);
+    letter-spacing: 0.05em; color: var(--heading); text-decoration: none; line-height: 1;
   }
-  .wordmark .mark { width: 0.95em; height: 0.95em; margin: 0 0.03em; position: relative; top: 0.04em; }
-  .nav-links { display: flex; align-items: center; gap: 28px; font-size: var(--l4); color: var(--body); }
+  /* The mark sits in a run of capitals, so it is sized against the cap height rather than
+     the em box — 0.82em lands on the same optical line as the S and the M. It also needs
+     its own viewBox: without one the browser gives an inline <svg> a 300x150 default
+     aspect and the mark renders squashed, which is what made the header look broken. */
+  .wordmark .mark { width: 0.82em; height: 0.82em; margin: 0 0.04em; }
+  .nav-links { display: flex; align-items: center; gap: clamp(16px, 2vw, 26px); font-size: var(--l4); color: var(--body); }
   .nav-links a { text-decoration: none; }
   .nav-links a:hover { color: var(--heading); }
   @media (max-width: 720px) { .nav-links .hide-sm { display: none; } }
@@ -71,14 +87,14 @@
   /* ── buttons: 48px tall, filled or outline, 12px radius ──────────────── */
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 12px;
-    height: 48px; padding: 0 24px; border-radius: var(--radius);
-    font: inherit; font-size: var(--l2, 18px); font-weight: 600;
+    height: 44px; padding: 0 20px; border-radius: var(--radius);
+    font: inherit; font-size: var(--l4); font-weight: 600;
     text-decoration: none; cursor: pointer; white-space: nowrap;
     border: 1px solid transparent; background: var(--raised); color: var(--heading);
     transition: background .15s, border-color .15s;
   }
   .btn:hover { background: var(--elevated); }
-  .btn svg { width: 24px; height: 24px; flex: none; }
+  .btn svg { width: 18px; height: 18px; flex: none; }
   .btn-primary { background: var(--action); color: #fff; }
   .btn-primary:hover { background: var(--action-hover); }
   .btn-ghost { background: transparent; border-color: var(--elevated); }
@@ -90,78 +106,92 @@
   .fade { pointer-events: none; position: absolute; left: 0; right: 0; height: 96px; z-index: 10; }
   .fade-top { top: 0; background: linear-gradient(to bottom, var(--page), transparent); }
   .fade-bot { bottom: 0; background: linear-gradient(to top, var(--page), transparent); }
-  .hero-in { position: relative; z-index: 20; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 32px; padding: 64px 24px; }
-  .hero h1 { max-width: 20ch; }
-  .hero .sub { font-size: var(--p1); color: var(--body); max-width: 60ch; line-height: 1.45; }
-  .hero-cta { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; margin-top: 8px; }
+  /* Constrained to the same 1200px measure as every other section, and to a text column
+     narrow enough to read. `ch` units in a monospace font are wide — 60ch was over 700px,
+     which is why the hero copy ran the width of the screen. */
+  .hero-in {
+    position: relative; z-index: 20; width: 100%; max-width: 900px;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+    gap: 24px; padding: 64px clamp(20px, 4vw, 40px);
+  }
+  .hero h1 { max-width: 24ch; }
+  .hero .sub { font-size: var(--p1); color: var(--body); max-width: 52ch; line-height: 1.6; }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 8px; }
+  .row-left { justify-content: flex-start; margin-top: 32px; }
   .kicker { font-size: var(--l5); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
 
   /* ── sections ─────────────────────────────────────────────────────────── */
-  section.band { padding: 96px 0; }
-  .band-head { display: flex; flex-direction: column; gap: 16px; align-items: center; text-align: center; margin-bottom: 48px; }
-  .band-head p { font-size: var(--p1); color: var(--body); max-width: 66ch; line-height: 1.45; }
+  section.band { padding: var(--band) 0; }
+  .band-head { display: flex; flex-direction: column; gap: 14px; align-items: center; text-align: center; margin: 0 auto clamp(32px, 4vw, 44px); max-width: 760px; }
+  .band-head p { font-size: var(--p1); color: var(--body); max-width: 56ch; line-height: 1.6; }
 
-  /* ── cards: gapped grid, 12px radius, 64px icon, button at the foot ──── */
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
-  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  /* ── cards: gapped grid, 12px radius, 56px icon, button at the foot ──── */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media (max-width: 980px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
   .card {
-    background: var(--card); border-radius: var(--radius); padding: 32px;
-    display: flex; flex-direction: column; gap: 32px; justify-content: space-between; height: 100%;
+    background: var(--card); border-radius: var(--radius); padding: clamp(22px, 2.4vw, 28px);
+    display: flex; flex-direction: column; gap: 26px; justify-content: space-between; height: 100%;
   }
-  .card-top { display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
-  .card-top svg { width: 64px; height: 64px; color: var(--heading); }
-  .card-txt { display: flex; flex-direction: column; gap: 12px; }
-  .card p { font-size: var(--p3); color: var(--muted); line-height: 1.45; }
+  .card-top { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; }
+  .card-top svg { width: 56px; height: 56px; color: var(--heading); }
+  .card-txt { display: flex; flex-direction: column; gap: 10px; }
+  .card p { font-size: var(--p4); color: var(--muted); line-height: 1.6; }
 
   /* ── the record: four figures on card surfaces ────────────────────────── */
-  .figs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+  .figs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
   @media (max-width: 900px) { .figs { grid-template-columns: repeat(2, 1fr); } }
-  .fig { background: var(--card); border-radius: var(--radius); padding: 32px; }
-  .fig dt { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
-  .fig dd { margin: 0; font-size: var(--h2); font-weight: 600; color: var(--heading); font-variant-numeric: tabular-nums; }
-  .fig .sub { font-size: var(--p4); color: var(--muted); margin-top: 12px; }
-  .prose { display: flex; flex-direction: column; gap: 20px; margin-top: 48px; }
-  .prose p { font-size: var(--p3); color: var(--body); line-height: 1.6; max-width: 78ch; }
+  .fig { background: var(--card); border-radius: var(--radius); padding: clamp(20px, 2.2vw, 26px); }
+  .fig dt { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
+  /* Its own clamp rather than --h2: these are figures, not headings, and one of them is
+     "-3,196.65" — nine tabular-width glyphs, which at heading size overflowed a quarter
+     of the row. */
+  .fig dd { margin: 0; font-size: clamp(19px, 2vw, 24px); font-weight: 600; color: var(--heading); font-variant-numeric: tabular-nums; }
+  .fig .sub { font-size: var(--p4); color: var(--muted); margin-top: 10px; line-height: 1.5; }
+  /* Measure, not container width. 78ch of monospace is over 700px — well past the ~70
+     characters a line can carry before the eye loses its place returning. */
+  .prose { display: flex; flex-direction: column; gap: 18px; margin-top: clamp(32px, 4vw, 44px); }
+  .prose p { font-size: var(--p3); color: var(--body); line-height: 1.7; max-width: 66ch; }
   .prose strong { color: var(--heading); font-weight: 600; }
 
   /* ── code blocks ──────────────────────────────────────────────────────── */
   .code { position: relative; }
   pre {
-    margin: 0; padding: 24px 88px 24px 24px; overflow-x: auto;
+    margin: 0; padding: 20px 80px 20px 20px; overflow-x: auto;
     background: var(--raised); border-radius: var(--radius);
-    font-family: inherit; font-size: var(--p4); line-height: 1.65; color: var(--heading);
+    font-family: inherit; font-size: var(--p4); line-height: 1.7; color: var(--heading);
   }
   .copy {
-    position: absolute; top: 12px; right: 12px; height: 32px; padding: 0 12px;
+    position: absolute; top: 10px; right: 10px; height: 30px; padding: 0 11px;
     border-radius: 8px; border: 1px solid var(--elevated); background: var(--card);
     color: var(--body); font: inherit; font-size: var(--l5); cursor: pointer;
   }
   .copy:hover { color: var(--heading); background: var(--elevated); }
 
   /* ── setup tabs ───────────────────────────────────────────────────────── */
-  .tabs { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 24px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
   .tab {
-    height: 48px; padding: 0 24px; border-radius: var(--radius);
+    height: 42px; padding: 0 18px; border-radius: var(--radius);
     background: var(--card); border: 1px solid transparent; color: var(--muted);
     font: inherit; font-size: var(--l4); font-weight: 600; cursor: pointer;
   }
   .tab:hover { color: var(--heading); background: var(--raised); }
   .tab[aria-selected="true"] { background: var(--raised); color: var(--heading); border-color: var(--action); }
-  .panel { background: var(--card); border-radius: var(--radius); padding: 32px; }
+  .panel { background: var(--card); border-radius: var(--radius); padding: clamp(22px, 2.4vw, 28px); }
   .panel[hidden] { display: none; }
-  .panel h4 { margin-bottom: 12px; }
-  .panel .note { font-size: var(--p4); color: var(--muted); line-height: 1.6; margin-bottom: 24px; max-width: 88ch; }
-  .step { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 24px 0 10px; }
+  .panel h4 { margin-bottom: 10px; }
+  .panel .note { font-size: var(--p4); color: var(--muted); line-height: 1.7; margin-bottom: 22px; max-width: 68ch; }
+  .step { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 22px 0 9px; }
   .panel > .step:first-of-type { margin-top: 0; }
 
   /* ── footer ───────────────────────────────────────────────────────────── */
-  footer { padding: 64px 0 96px; }
-  .foot { display: flex; flex-wrap: wrap; gap: 48px; justify-content: space-between; }
-  .foot h5 { margin: 0 0 16px; font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
-  .foot a { display: block; padding: 4px 0; font-size: var(--p4); color: var(--body); text-decoration: none; }
+  footer { padding: clamp(48px, 6vw, 64px) 0 clamp(56px, 7vw, 88px); border-top: 1px solid rgba(255,255,255,0.06); }
+  .foot { display: flex; flex-wrap: wrap; gap: clamp(28px, 4vw, 48px); justify-content: space-between; }
+  .foot h5 { margin: 0 0 14px; font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .foot a { display: block; padding: 3px 0; font-size: var(--p4); color: var(--body); text-decoration: none; }
   .foot a:hover { color: var(--heading); }
-  .fine { margin-top: 48px; font-size: var(--p4); color: var(--muted); line-height: 1.6; max-width: 90ch; }
+  .fine { margin-top: clamp(32px, 4vw, 44px); font-size: var(--p4); color: var(--muted); line-height: 1.7; max-width: 72ch; }
+  .foot-blurb { margin-top: 14px; max-width: 30ch; }
 </style>
 </head>
 <body>
@@ -178,7 +208,7 @@
 
 <nav>
   <div class="wrap nav-in">
-    <a class="wordmark" href="#top" aria-label="Somnus">S<svg class="mark" aria-hidden="true"><use href="#mark"/></svg>MNUS</a>
+    <a class="wordmark" href="#top" aria-label="Somnus">S<svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>MNUS</a>
     <div class="nav-links">
       <a href="#record" class="hide-sm">Record</a>
       <a href="#verify" class="hide-sm">Verify</a>
@@ -309,7 +339,7 @@
         stays. One that looked better and could not be interrogated would be worth less.
       </p>
     </div>
-    <div class="hero-cta" style="justify-content:flex-start;margin-top:32px">
+    <div class="hero-cta row-left">
       <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/agent/pnl">Raw P&amp;L JSON</a>
       <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/agent/report">Full report</a>
     </div>
@@ -350,7 +380,7 @@ signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
         found while auditing this project, and fixed rather than hidden.
       </p>
     </div>
-    <div class="hero-cta" style="justify-content:flex-start;margin-top:32px">
+    <div class="hero-cta row-left">
       <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/proof">Browse the chain</a>
     </div>
   </div>
@@ -387,8 +417,8 @@ signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
   <div class="wrap">
     <div class="foot">
       <div>
-        <span class="wordmark">S<svg class="mark" aria-hidden="true"><use href="#mark"/></svg>MNUS</span>
-        <p class="fine" style="margin-top:16px;max-width:32ch">
+        <span class="wordmark">S<svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>MNUS</span>
+        <p class="fine foot-blurb">
           Built for the Somnia × DreamDEX Event Contracts hackathon. Testnet only.
         </p>
       </div>
