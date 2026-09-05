@@ -27,7 +27,8 @@
  *  records which regime a trade was placed under and a later study can split on
  *  it instead of pooling regimes together.                                      */
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DATA_DIR, debug } from '../config';
 
 export type HorizonTier = 'validated' | 'provisional' | 'blocked';
@@ -90,6 +91,26 @@ export interface CalibrationFile {
 
 export const CALIBRATION_PATH = join(DATA_DIR, 'horizon-calibration.json');
 
+/** A measured study committed to the repo, read when `DATA_DIR` has none.
+ *
+ *  `data/` is gitignored — correctly, it holds the proof chain and the ledger — which
+ *  meant a fresh deploy had no calibration at all and advertised "built-in default" tiers
+ *  while the real study sat on the operator's laptop. On a hosted demo that is the
+ *  difference between "here is what this agent has measured about itself" and "here are
+ *  some constants somebody chose".
+ *
+ *  This is a SEED, not a substitute. `data/horizon-calibration.json` still wins whenever
+ *  it exists, so a running agent's own study always overrides the shipped one. Re-run
+ *  `npm run horizon-study` and copy the result here to update what a fresh deploy starts
+ *  from.
+ *
+ *  Overridable by env for the same reason `SOMNUS_ENV_PATH` is: the test suite runs
+ *  against a throwaway `DATA_DIR`, so without a way to point this somewhere absent the
+ *  seed would silently satisfy every test written to exercise the built-in fallback. */
+export const CALIBRATION_SEED_PATH =
+  process.env.SOMNUS_CALIBRATION_SEED ||
+  join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'calibration.seed.json');
+
 /** Fallback when no study has been run. Deliberately cautious: only the class
  *  whose verdict every run has reproduced is trusted. Run `npm run horizon-study`
  *  and the real measurements replace all of this. */
@@ -109,20 +130,32 @@ const MAX_EXTRAPOLATION_RATIO = Number(process.env.AGENT_HORIZON_EXTRAPOLATION ?
 let cache: { at: number; rows: Map<number, CalibrationRow> } | undefined;
 const CACHE_MS = 60_000;
 
-function calibration(): Map<number, CalibrationRow> {
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.rows;
-  const rows = new Map<number, CalibrationRow>();
+function readCalibrationFrom(path: string, rows: Map<number, CalibrationRow>): boolean {
   try {
-    const doc = JSON.parse(readFileSync(CALIBRATION_PATH, 'utf8')) as CalibrationFile;
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as CalibrationFile;
     for (const r of doc.classes ?? []) {
       if (!Number.isFinite(r.classSec) || r.classSec <= 0) continue;
       if (r.tier !== 'validated' && r.tier !== 'provisional' && r.tier !== 'blocked') continue;
       rows.set(r.classSec, r);
     }
-    debug(`horizon: loaded ${rows.size} measured class(es) from ${CALIBRATION_PATH}`);
+    if (rows.size === 0) return false;
+    debug(`horizon: loaded ${rows.size} measured class(es) from ${path}`);
+    return true;
   } catch {
-    // No study run yet, or the file is unreadable. Fall back rather than throw —
-    // a missing measurement must not stop the agent, only make it cautious.
+    return false;
+  }
+}
+
+function calibration(): Map<number, CalibrationRow> {
+  if (cache && Date.now() - cache.at < CACHE_MS) return cache.rows;
+  const rows = new Map<number, CalibrationRow>();
+  // The agent's own study first, then the study shipped with the repo, then constants.
+  // Each step down is a real loss of evidence, so the order is worth stating: a running
+  // agent overrides a deploy-time seed, and a seed overrides somebody's judgement.
+  if (!readCalibrationFrom(CALIBRATION_PATH, rows) && !readCalibrationFrom(CALIBRATION_SEED_PATH, rows)) {
+    // No study anywhere, or both unreadable. Fall back rather than throw — a missing
+    // measurement must not stop the agent, only make it cautious.
+    rows.clear();
     for (const [classSec, tier, note] of FALLBACK) {
       rows.set(classSec, {
         classSec,
@@ -145,11 +178,21 @@ export function resetCalibrationCache(): void {
   cache = undefined;
 }
 
-/** The tier table as data, for the API and the doctor. Reports whether the
- *  verdicts are measured or the built-in fallback, so nobody mistakes a default
- *  for evidence. */
+/** The tier table as data, for the API and the doctor.
+ *
+ *  `source` distinguishes three genuinely different claims, because collapsing them
+ *  misreports the evidence in both directions:
+ *
+ *    measured           this agent ran the study on its own settled trades
+ *    seeded             a study committed to the repo — real measurements, but not
+ *                       this deployment's, and not updated by anything it has done
+ *    built-in default   constants somebody chose, no measurement behind them
+ *
+ *  A fresh deploy reads the seed and used to report that as "built-in default", which
+ *  undersold real evidence; reporting it as "measured" would oversell it as this
+ *  agent's own. Neither is true, so there are three values. */
 export function calibrationSummary(): {
-  source: 'measured' | 'built-in default';
+  source: 'measured' | 'seeded' | 'built-in default';
   generatedAt?: string;
   windowsScored?: number;
   minSamples?: number;
@@ -161,14 +204,28 @@ export function calibrationSummary(): {
   classes: Array<{ class: string; classSec: number; tier: HorizonTier; n: number; note: string }>;
 } {
   let doc: CalibrationFile | undefined;
+  let source: 'measured' | 'seeded' | 'built-in default' = 'built-in default';
   try {
     doc = JSON.parse(readFileSync(CALIBRATION_PATH, 'utf8')) as CalibrationFile;
+    if ((doc.classes ?? []).length > 0) source = 'measured';
+    else doc = undefined;
   } catch {
     doc = undefined;
   }
+  if (!doc) {
+    try {
+      const seed = JSON.parse(readFileSync(CALIBRATION_SEED_PATH, 'utf8')) as CalibrationFile;
+      if ((seed.classes ?? []).length > 0) {
+        doc = seed;
+        source = 'seeded';
+      }
+    } catch {
+      // Neither file readable — `source` stays 'built-in default', which is then true.
+    }
+  }
   const rows = [...calibration().values()].sort((a, b) => a.classSec - b.classSec);
   return {
-    source: doc ? 'measured' : 'built-in default',
+    source,
     generatedAt: doc?.generatedAt,
     windowsScored: doc?.windowsScored,
     minSamples: doc?.minSamples,

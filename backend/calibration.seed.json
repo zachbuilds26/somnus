@@ -1,0 +1,53 @@
+{
+  "generatedAt": "2026-08-26T12:10:05.142Z",
+  "leadFraction": 0.5,
+  "minSamples": 40,
+  "windowsScored": 4000,
+  "classes": [
+    {
+      "classSec": 60,
+      "n": 3110,
+      "brier": 0.2502589484808981,
+      "base": 0.249999896609837,
+      "calErr": 0.00025447530713590405,
+      "tier": "blocked",
+      "note": "Brier 0.2503 is no better than the 0.2500 base rate over n=3110"
+    },
+    {
+      "classSec": 300,
+      "n": 622,
+      "brier": 0.18873138938251027,
+      "base": 0.24941843033053954,
+      "calErr": 0.05616916133415486,
+      "tier": "validated",
+      "note": "Brier 0.1887 vs 0.2494 base rate, calibration error 0.056, n=622"
+    },
+    {
+      "classSec": 900,
+      "n": 206,
+      "brier": 0.18680982434751311,
+      "base": 0.24884532001131066,
+      "calErr": 0.044367405456598216,
+      "tier": "validated",
+      "note": "Brier 0.1868 vs 0.2488 base rate, calibration error 0.044, n=206"
+    },
+    {
+      "classSec": 3600,
+      "n": 50,
+      "brier": 0.1435119573709969,
+      "base": 0.24000000000000007,
+      "calErr": 0.21529899158854118,
+      "tier": "provisional",
+      "note": "beats the base rate (0.1435 vs 0.2400) but calibration error 0.215 exceeds 0.15, n=50"
+    },
+    {
+      "classSec": 14400,
+      "n": 12,
+      "brier": 0.22874461501198376,
+      "base": 0.24305555555555555,
+      "calErr": 0.1260479667788597,
+      "tier": "provisional",
+      "note": "n=12 of 40 needed to judge"
+    }
+  ]
+}

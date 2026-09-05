@@ -42,6 +42,21 @@ services:
         value: true
       - key: AGENT_MODE
         value: dry-run
+      # Start the decision loop on boot.
+      #
+      # Off by default in the code, because a process that begins trading the moment it
+      # starts is the wrong default for something holding a key. Here it is right, and
+      # safe, precisely because DRY_RUN and AGENT_MODE above are dry-run: the loop
+      # prices live windows every 60s, records every decision to the signed chain, and
+      # sends nothing.
+      #
+      # Without this the hosted service is idle forever. Anyone visiting the URL sees
+      # `loop: {running: false, cycles: 0}`, an empty proof chain, zero P&L, and
+      # `blocked: ["no order book has ever been read successfully — the agent is
+      # blind"]` — that last one being literally true of a service nobody has asked for
+      # a book yet. Nothing is broken in that state and all of it reads as broken.
+      - key: AGENT_AUTOSTART
+        value: true
       - key: AGENT_MAX_TRADE_SIZE
         value: 50
       - key: AGENT_MAX_DAILY_LOSS
@@ -83,3 +98,36 @@ services:
       - key: ALLOWED_ORIGINS
         value: http://localhost:5173
     autoDeploy: true
+    # ── Persistent history (NOT enabled: needs a paid plan) ──────────────────────
+    #
+    # Without a disk, `backend/data/` lives in the container filesystem and is recreated
+    # on every deploy. The proof chain, the P&L ledger and the measured calibration all
+    # start from nothing each time — so the hosted service can never accumulate the
+    # history that is the whole point of a signed audit trail. `calibration.seed.json` is
+    # committed to the repo for exactly this reason, and it is a workaround, not a fix:
+    # the chain and the ledger still reset.
+    #
+    # Render disks require a PAID instance. Render's own docs: "You can attach a
+    # persistent disk to a paid Render web service, private service, or background
+    # worker." The free tier is excluded, so uncommenting the block below while `plan:
+    # free` is set above will fail the deploy — change the plan in the same edit.
+    #
+    # Two other consequences worth knowing before flipping it: a disk pins the service to
+    # a single instance, and attaching one forfeits zero-downtime deploys (the old
+    # container stops before the new one starts). Both are fine for this; neither is
+    # reversible in the sense that disk capacity can be raised but never lowered.
+    #
+    #   plan: starter          # replaces `plan: free` above
+    #   disk:
+    #     name: somnus-data
+    #     mountPath: /var/somnus-data
+    #     sizeGB: 1
+    #
+    # and add, in envVars:
+    #
+    #   - key: DATA_DIR
+    #     value: /var/somnus-data
+    #
+    # DATA_DIR is read straight from the environment (backend/src/config.ts), so pointing
+    # it at the mount is the only wiring needed.
+

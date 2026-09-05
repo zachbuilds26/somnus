@@ -253,7 +253,7 @@ Run `npm run horizon-study` to re-score and promote/demote tiers. The agent pick
 
 ```bash
 npm run typecheck     # tsc --noEmit
-npm test              # 130 unit + regression tests, no network, no keys
+npm test              # 229 unit + regression tests, no network, no keys
 npm run doctor        # read-only connectivity probe (no keys needed)
 npm run faucet        # mint test tUSDC to trade key (testnet)
 npm run claim         # report claimable settled positions
@@ -262,6 +262,21 @@ npm run horizon-study # re-score all horizon classes
 npm run calibration   # view current tier table
 npm run survey        # what markets are actually live right now
 ```
+
+`data/` is gitignored — it holds the proof chain and the P&L ledger — so a fresh clone or
+a fresh deploy has no measured tier table. `backend/calibration.seed.json` is a committed
+study (4,000 scored windows) that fills that gap, and `/agent/horizons` says which one you
+are looking at:
+
+| `source` | Means |
+| --- | --- |
+| `measured` | this agent ran the study on its own settled trades |
+| `seeded` | the study committed to the repo — real measurements, not this deployment's |
+| `built-in default` | constants, no measurement behind them |
+
+`data/horizon-calibration.json` always wins when present, so a running agent's own
+measurements override the seed. After `npm run horizon-study`, copy the result over
+`calibration.seed.json` to update what a fresh deploy starts from.
 
 ---
 
