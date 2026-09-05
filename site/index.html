@@ -105,21 +105,12 @@
   .stat .foot { font-size: 12.5px; color: var(--ink-3); margin-top: 8px; font-family: 'Space Grotesk', sans-serif; }
   @media (max-width: 860px) { .stats { grid-template-columns: repeat(2, 1fr); } }
 
-  .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; }
-  .dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(74,222,128,0.15); }
-  .dot.hold { background: var(--warn); box-shadow: 0 0 0 3px rgba(251,191,36,0.15); }
 
   /* ── verifier ────────────────────────────────────────────────────── */
   .verify { margin-top: 36px; border: 1px solid var(--line); }
-  .verify-head { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; padding: 20px 22px; border-bottom: 1px solid var(--line); }
-  .verify-head strong { font-weight: 600; font-size: 15px; }
   .verify-out { padding: 20px 22px; font-family: var(--mono); font-size: 13px; color: var(--ink-2); white-space: pre-wrap; margin: 0; min-height: 84px; }
   .verify-out .pass { color: var(--ok); }
   .verify-out .fail { color: var(--accent); }
-  .spin { animation: sp 0.9s linear infinite; }
-  @keyframes sp { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 
   /* ── setup / agent picker ────────────────────────────────────────── */
   .tabs { display: flex; flex-wrap: wrap; gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); }
@@ -202,8 +193,7 @@
         Connect your coding agent
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
       </a>
-      <a class="btn" href="#verify">Verify the chain yourself</a>
-      <span class="pill" id="live-pill"><span class="dot" id="live-dot"></span><span id="live-text">checking the agent…</span></span>
+      <a class="btn" href="https://github.com/zachbuilds26/somnus">Read the source</a>
     </div>
   </div>
 </header>
@@ -230,7 +220,7 @@
           Each window length is scored against its own base rate. One-minute windows are blocked
           outright — 3,110 samples said they were no better than a coin flip.
         </p>
-        <a class="card-act" href="/api/agent/horizons">
+        <a class="card-act" href="https://somnus-backend.onrender.com/api/agent/horizons">
           Open the tier table
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
         </a>
@@ -241,7 +231,7 @@
           Daily loss, drawdown, loss streak, execution failures, stale data, clock drift, a dead
           book feed. Enforced server-side, and the reason is always recorded.
         </p>
-        <a class="card-act" href="/api/health">
+        <a class="card-act" href="https://somnus-backend.onrender.com/api/health">
           Read live health
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
         </a>
@@ -252,18 +242,19 @@
 
 <section id="record">
   <div class="wrap">
-    <p class="eyebrow">The record · live from this deployment</p>
+    <p class="eyebrow">The record · snapshot, 5 September 2026</p>
     <h2>It is not profitable. Here is the number, and here is why.</h2>
     <p class="lede">
-      Everything below is read from <code class="mono">/api/agent/pnl</code> the moment you load this
-      page. Nothing is typed in by hand, and nothing flattering has been left out.
+      This page is static, so the figures below are a dated snapshot rather than a live read — the
+      links under them go to the running agent, which is the copy to believe if the two ever
+      disagree.
     </p>
 
-    <dl class="stats" id="stats">
-      <div class="stat"><dt>Settled trades</dt><dd id="s-fills">—</dd><div class="foot" id="s-fills-foot">loading</div></div>
-      <div class="stat"><dt>Win rate</dt><dd id="s-win">—</dd><div class="foot" id="s-win-foot">loading</div></div>
-      <div class="stat"><dt>Realised P&amp;L</dt><dd id="s-pnl">—</dd><div class="foot">tUSDC, testnet</div></div>
-      <div class="stat"><dt>Signed entries</dt><dd id="s-chain">—</dd><div class="foot">hash-linked</div></div>
+    <dl class="stats">
+      <div class="stat"><dt>Settled trades</dt><dd>76</dd><div class="foot">28 won, 48 lost</div></div>
+      <div class="stat"><dt>Win rate</dt><dd>36.8%</dd><div class="foot">a coin flip is 50%</div></div>
+      <div class="stat"><dt>Realised P&amp;L</dt><dd>-3,196.65</dd><div class="foot">tUSDC, testnet</div></div>
+      <div class="stat"><dt>Signed entries</dt><dd>2,885</dd><div class="foot">hash-linked</div></div>
     </dl>
 
     <p class="lede" style="margin-top:34px">
@@ -285,8 +276,8 @@
       stays. One that looked better and could not be interrogated would be worth less.
     </p>
     <div class="cta-row">
-      <a class="btn" href="/api/agent/pnl">Raw P&amp;L JSON</a>
-      <a class="btn" href="/api/agent/report">Full report by horizon and tier</a>
+      <a class="btn" href="https://somnus-backend.onrender.com/api/agent/pnl">Raw P&amp;L JSON</a>
+      <a class="btn" href="https://somnus-backend.onrender.com/api/agent/report">Full report by horizon and tier</a>
     </div>
   </div>
 </section>
@@ -294,23 +285,28 @@
 <section id="verify">
   <div class="wrap">
     <p class="eyebrow">Verify</p>
-    <h2>Do not trust the numbers above. Check them.</h2>
+    <h2>Do not trust the numbers above. Check them yourself.</h2>
     <p class="lede">
       Every entry carries the hash of the one before it, so nothing can be reordered or removed
       without breaking the chain, and most are signed with the wallet that placed the trades. The
-      button below runs the real check against this server — no key required, because an audit that
-      needs the operator's secret is not an audit.
+      endpoint needs no key — an audit that requires the operator's secret is not an audit — so this
+      command works from your terminal right now.
     </p>
 
+    <div class="code" style="margin-top:32px">
+<pre>curl -s -X POST https://somnus-backend.onrender.com/api/proof/verify \
+  -H 'content-type: application/json' -d '{}'</pre>
+      <button class="copy" type="button">Copy</button>
+    </div>
+
+    <p class="step">What it answered on 5 September 2026</p>
     <div class="verify">
-      <div class="verify-head">
-        <strong>POST /api/proof/verify</strong>
-        <button class="btn" id="verify-btn" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" id="verify-icon"><path d="M20 6 9 17l-5-5"/></svg>
-          <span id="verify-label">Verify the chain</span>
-        </button>
-      </div>
-      <pre class="verify-out" id="verify-out" aria-live="polite">Not run yet. Nothing is cached client-side — this calls the server when you press it.</pre>
+<pre class="verify-out">linkage, every entry          <span class="pass">PASS</span>   2,885 checked
+recomputed head matches       <span class="pass">PASS</span>
+signatures valid              <span class="pass">PASS</span>   400 of 400
+older signatures out of scope 2,399 — pageable
+unsigned historical entries   152 — reported, not hidden
+signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
     </div>
 
     <p class="lede" style="margin-top:26px">
@@ -319,6 +315,9 @@
       because leaving it off made a single anonymous request cost 78 seconds of CPU — found while
       auditing this project, and fixed rather than hidden.
     </p>
+    <div class="cta-row">
+      <a class="btn" href="https://somnus-backend.onrender.com/api/proof">Browse the chain</a>
+    </div>
   </div>
 </section>
 
@@ -361,11 +360,11 @@
       </div>
       <div class="foot-col">
         <h4>Live endpoints</h4>
-        <a href="/api/health">Health</a>
-        <a href="/api/agent/pnl">P&amp;L</a>
-        <a href="/api/agent/horizons">Horizon tiers</a>
-        <a href="/api/proof">Proof chain</a>
-        <a href="/metrics">Metrics</a>
+        <a href="https://somnus-backend.onrender.com/api/health">Health</a>
+        <a href="https://somnus-backend.onrender.com/api/agent/pnl">P&amp;L</a>
+        <a href="https://somnus-backend.onrender.com/api/agent/horizons">Horizon tiers</a>
+        <a href="https://somnus-backend.onrender.com/api/proof">Proof chain</a>
+        <a href="https://somnus-backend.onrender.com/metrics">Metrics</a>
       </div>
       <div class="foot-col">
         <h4>Project</h4>
@@ -390,119 +389,16 @@
 </footer>
 
 <script>
-/* Every figure on this page comes from this deployment's own API. Nothing is hardcoded,
-   which is the only way a page making claims about verifiability has any business making
-   them. Each fetch handles its own failure: a dead endpoint says so rather than leaving a
-   dash that reads as zero. */
-const URL_BASE = location.origin;
-const el = (id) => document.getElementById(id);
-const fmt = (n, d = 0) =>
-  typeof n === 'number' && isFinite(n)
-    ? n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
-    : '—';
+/* This page is STATIC. It reads nothing from the agent and calls no API — every figure on
+   it is a dated snapshot, and the links go to the running service for anyone who wants the
+   current numbers. The only JavaScript here renders the setup picker and the copy buttons.
 
-async function getJSON(path, ms = 25000) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), ms);
-  try {
-    const r = await fetch(URL_BASE + path, { signal: ctl.signal });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return await r.json();
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-/* ── is it trading right now ─────────────────────────────────────────────── */
-(async () => {
-  const dot = el('live-dot'), txt = el('live-text');
-  try {
-    const h = await getJSON('/api/health');
-    const blocked = (h.risk && h.risk.blocked) || [];
-    const cycles = (h.loop && h.loop.cycles) || 0;
-    if (blocked.length > 0) {
-      dot.className = 'dot hold';
-      txt.textContent = 'holding: ' + blocked[0];
-    } else {
-      dot.className = 'dot live';
-      txt.textContent =
-        (h.agentMode === 'live' ? 'live' : 'dry-run') + ' · ' + cycles + ' cycles · nothing blocking';
-    }
-  } catch (e) {
-    /* A free instance asleep takes ~50s to wake, so this is a normal state, not a fault. */
-    dot.className = 'dot';
-    txt.textContent = 'agent unreachable — it may be waking up';
-  }
-})();
-
-/* ── the record ──────────────────────────────────────────────────────────── */
-(async () => {
-  const fail = (m) => {
-    for (const id of ['s-fills', 's-win', 's-pnl', 's-chain']) el(id).textContent = '—';
-    el('s-fills-foot').textContent = m;
-    el('s-win-foot').textContent = '';
-  };
-  try {
-    const [p, proof] = await Promise.all([getJSON('/api/agent/pnl'), getJSON('/api/proof?limit=1')]);
-    el('s-fills').textContent = fmt(p.closedTrades);
-    el('s-fills-foot').textContent = fmt(p.wins) + ' won, ' + fmt(p.losses) + ' lost';
-    el('s-win').textContent = fmt((p.winRate || 0) * 100, 1) + '%';
-    el('s-win-foot').textContent = 'a coin flip is 50%';
-    /* No sign-flipping and no colour: a loss reads as a loss without being dressed up. */
-    el('s-pnl').textContent = fmt(p.realizedPnl, 2);
-    el('s-chain').textContent = fmt(proof.total);
-  } catch (e) {
-    fail('could not read the ledger — the agent may be waking up');
-  }
-})();
-
-/* ── the verifier ────────────────────────────────────────────────────────── */
-el('verify-btn').addEventListener('click', async () => {
-  const btn = el('verify-btn'), out = el('verify-out'), label = el('verify-label'), icon = el('verify-icon');
-  btn.disabled = true;
-  icon.classList.add('spin');
-  label.textContent = 'Verifying…';
-  out.textContent =
-    'POST /api/proof/verify\n\nRe-hashing the chain and recovering signatures. First run takes a\nfew seconds — the result is then cached against the chain head.';
-  const t0 = Date.now();
-  try {
-    const r = await fetch(URL_BASE + '/api/proof/verify', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    const j = await r.json();
-    const ms = Date.now() - t0;
-    const mark = (ok) => (ok ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>');
-    const rows = [
-      'linkage, every entry          ' + mark(j.linkageOk) + '   ' + fmt(j.checked) + ' checked',
-      'recomputed head matches       ' + mark(j.headMatches),
-      'signatures valid              ' + mark(j.signaturesOk) + '   ' + fmt(j.signaturesValid) + ' of ' + fmt(j.signaturesChecked),
-    ];
-    if (j.signaturesSkipped) rows.push('older signatures not in scope ' + fmt(j.signaturesSkipped) + ' — pageable');
-    if (j.unsignedEntries) rows.push('unsigned historical entries   ' + fmt(j.unsignedEntries) + ' — reported, not hidden');
-    rows.push('signer                        ' + (j.signer || 'none configured'));
-    rows.push('');
-    rows.push('answered in ' + ms + 'ms' + (j.cached ? ' (cached against the current head)' : ''));
-    out.innerHTML = rows.join('\n');
-  } catch (e) {
-    out.textContent =
-      'Could not reach the verifier.\n\n' +
-      String(e && e.message ? e.message : e) +
-      '\n\nA free instance sleeps when idle and takes about 50 seconds to wake.\nTry once more.';
-  } finally {
-    btn.disabled = false;
-    icon.classList.remove('spin');
-    label.textContent = 'Verify again';
-  }
-});
-
-/* ── setup, per agent ────────────────────────────────────────────────────────
+   ── setup, per agent ────────────────────────────────────────────────────────
    Formats verified against each vendor's own docs rather than assumed, because they
-   differ in ways that fail silently: Windsurf wants `serverUrl` where everyone else
-   wants `url`, Cline needs `streamableHttp` in camelCase or it falls back to SSE and
-   405s, Gemini wants `httpUrl` for streaming and `url` only for SSE. A config copied
-   between two of these does not work.                                              */
+   differ in ways that fail silently: Windsurf and Antigravity want `serverUrl` where
+   everyone else wants `url`, Cline needs `streamableHttp` in camelCase or it falls back to
+   SSE and 405s, VS Code wants `servers` rather than `mcpServers`. A config copied between
+   two of these does not work.                                                        */
 const MCP = 'https://somnus-backend.onrender.com/mcp';
 const AGENTS = [
   {
@@ -554,11 +450,12 @@ AGENTS.push(
     ],
   },
   {
-    id: 'gemini', name: 'Gemini CLI',
-    note: '<code>httpUrl</code> for streaming HTTP; plain <code>url</code> is for SSE endpoints only. There is also a one-line CLI form.',
+    id: 'antigravity', name: 'Antigravity',
+    note: 'Google\'s agentic IDE. Uses <code>serverUrl</code>, not <code>url</code> — with <code>url</code> it fails with <em>"serverUrl or command must be specified"</em>. Open it from the Agent panel: <code>…</code> → MCP Servers → Manage MCP Servers → View raw config, then relaunch the app.',
     steps: [
-      ['gemini mcp add', 'gemini mcp add --transport http somnus ' + MCP + ' \\\n  --header "x-somnus-token: $(openssl rand -hex 24)"'],
-      ['or ~/.gemini/settings.json', '{\n  "mcpServers": {\n    "somnus": {\n      "httpUrl": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
+      ['~/.gemini/antigravity/mcp_config.json', '{\n  "mcpServers": {\n    "somnus": {\n      "serverUrl": "' + MCP + '",\n      "headers": { "x-somnus-token": "<a long random string>" }\n    }\n  }\n}'],
+      ['Windows path', '%USERPROFILE%\\.gemini\\antigravity\\mcp_config.json'],
+      ['Read-only instead', '{\n  "mcpServers": {\n    "somnus": { "serverUrl": "' + MCP + '" }\n  }\n}'],
     ],
   },
   {
@@ -627,19 +524,22 @@ AGENTS.forEach((a, i) => {
   });
 });
 
-/* One listener for every Copy button, present and future. Reports the outcome on the
-   button itself — a control that silently may or may not have worked is worse than none. */
-panelsEl.addEventListener('click', async (ev) => {
+/* One listener for every Copy button on the page, present and future — bound to the
+   document rather than to the setup panels, because the verify section has one too and a
+   handler scoped to the panels would have left it inert. Reports its outcome on the button
+   itself: a control that silently may or may not have worked is worse than none. */
+document.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('.copy');
   if (!btn) return;
-  const code = btn.parentElement.querySelector('pre').textContent;
+  const pre = btn.parentElement.querySelector('pre');
+  if (!pre) return;
   try {
-    await navigator.clipboard.writeText(code);
+    await navigator.clipboard.writeText(pre.textContent);
     btn.textContent = 'Copied';
   } catch {
     /* Clipboard needs a secure context and permission; select the text instead of lying. */
     const r = document.createRange();
-    r.selectNodeContents(btn.parentElement.querySelector('pre'));
+    r.selectNodeContents(pre);
     const sel = getSelection();
     sel.removeAllRanges();
     sel.addRange(r);

@@ -25,9 +25,9 @@ Built for the **Somnia × DreamDEX Event Contracts Hackathon**. Testnet-first.
 ```
 somnus/
 ├── backend/            # Node 20+ TypeScript API + autonomous agent runtime
-│   ├── public/         # the one static page served at GET /
 │   ├── demo/           # committed chain + ledger snapshot, for a diskless deploy
 │   └── calibration.seed.json
+├── site/               # standalone static explainer page — deploy anywhere
 ├── docs/               # training and calibration notes
 ├── PLAN.md             # product and implementation plan
 ├── .env.example        # safe testnet configuration template
@@ -36,7 +36,7 @@ somnus/
 
 **No trading UI — your coding agent is the interface.** A JSON API, an autonomous runtime, and an MCP surface: a hosted endpoint anyone can interrogate (and trade through with a wallet of their own), plus a local install that runs on your machine with your key.
 
-`GET /` serves one static page from the same process (`backend/public/index.html`). It is not a dashboard and nothing on it can place a trade — it reads `/api/health`, `/api/agent/pnl` and `/api/proof/verify` at load, so every figure on it is this deployment's own, including the loss. The **Verify the chain** button runs the real check in front of you. Same origin, so no CORS entry and no chance of it quietly showing a different deployment's numbers.
+`site/index.html` is a standalone explainer page — what Somnus is, its record, and copy-paste MCP setup for ten coding agents. It is **fully static**: one HTML file, no build step, no JavaScript that calls anything, and the backend does not serve it. Deploy it anywhere that hosts a file. Its figures are a dated snapshot with links through to the live endpoints, which are the copy to believe if the two ever disagree.
 
 ---
 
