@@ -13,16 +13,18 @@
 <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M27 17 A40 40 0 1 0 73 17' fill='none' stroke='white' stroke-width='11'/%3E%3Cpath d='M33 27 L50 10 L67 27 L58 27 L50 18 L42 27 Z' fill='%23FF0088'/%3E%3C/svg%3E" />
 <style>
-  /* Tokens taken from testnet.somnia.network's own stylesheet: --surface-default #141414,
-     --surface-raised #1c1c1c, --radius .75rem, Source Code Pro throughout. Their action
-     colour (#5c16cc, purple) is the one deliberate substitution — Somnus is #FF0088.
+  /* Neo-brutalist, held back on purpose. The grammar is hard edges, visible structure and
+     flat unblurred offset shadows — but at 1px borders and 3-4px offsets rather than the
+     usual 3px/8px, which is what keeps it sleek instead of a novelty.
 
-     The type SCALE is not copied, and that is deliberate. Their 40/32/24/20 ladder is set
-     in a proportional font; Source Code Pro is monospace, so every glyph is the width of
-     the widest one and the same pixel size reads noticeably larger and wider. Lifting the
-     numbers straight across is what made the first attempt feel oversized. These are the
-     same ladder brought down a step and made fluid, so it holds from a phone to a wide
-     display instead of jumping at one breakpoint. */
+     Inverted for a dark page: the convention puts black shadows on white, and a black
+     shadow on #000 is nothing at all, so the offsets are a low-opacity white. Structure
+     reads as light against dark rather than the reverse.
+
+     Surface tokens still come from testnet.somnia.network (--surface-default #141414,
+     --surface-raised #1c1c1c, Source Code Pro). What is deliberately dropped is their
+     --radius of .75rem: brutalism has square corners, and square corners are also the more
+     minimal choice. Their action purple #5c16cc remains substituted for #FF0088. */
   :root {
     --page: #000;
     --card: #141414;
@@ -33,7 +35,11 @@
     --muted: #666;
     --action: #FF0088;
     --action-hover: #d9006f;
-    --radius: 0.75rem;
+    --radius: 0;
+    --edge: 1px solid rgba(255,255,255,0.16);
+    --edge-strong: 1px solid rgba(255,255,255,0.30);
+    --lift: 4px 4px 0 0 rgba(255,255,255,0.08);
+    --lift-sm: 3px 3px 0 0 rgba(255,255,255,0.10);
     --h1: clamp(25px, 4.1vw, 42px);
     --h2: clamp(20px, 2.5vw, 27px);
     --h3: clamp(17px, 1.8vw, 20px);
@@ -67,7 +73,7 @@
   :focus-visible { outline: 2px solid rgba(255,255,255,0.28); outline-offset: 2px; }
 
   /* ── nav: 64px bar, logo left, links right ───────────────────────────── */
-  nav { position: sticky; top: 0; z-index: 30; height: 64px; background: rgba(0,0,0,0.82); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255,255,255,0.06); }
+  nav { position: sticky; top: 0; z-index: 30; height: 64px; background: rgba(0,0,0,0.86); backdrop-filter: blur(10px); border-bottom: var(--edge); }
   .nav-in { height: 64px; display: flex; align-items: center; justify-content: space-between; }
   .wordmark {
     display: inline-flex; align-items: center; gap: 1px;
@@ -84,21 +90,26 @@
   .nav-links a:hover { color: var(--heading); }
   @media (max-width: 720px) { .nav-links .hide-sm { display: none; } }
 
-  /* ── buttons: 48px tall, filled or outline, 12px radius ──────────────── */
+  /* ── buttons: square, edged, and they physically press ───────────────── */
   .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
     height: 44px; padding: 0 20px; border-radius: var(--radius);
     font: inherit; font-size: var(--l4); font-weight: 600;
     text-decoration: none; cursor: pointer; white-space: nowrap;
-    border: 1px solid transparent; background: var(--raised); color: var(--heading);
-    transition: background .15s, border-color .15s;
+    border: var(--edge); background: var(--raised); color: var(--heading);
+    box-shadow: var(--lift-sm);
+    transition: transform .08s, box-shadow .08s, background .12s;
   }
   .btn:hover { background: var(--elevated); }
+  /* The one brutalist move worth keeping literally: on press the element travels into its
+     own shadow. Costs nothing, and makes the offset read as depth rather than decoration. */
+  .btn:active { transform: translate(3px, 3px); box-shadow: none; }
   .btn svg { width: 18px; height: 18px; flex: none; }
-  .btn-primary { background: var(--action); color: #fff; }
-  .btn-primary:hover { background: var(--action-hover); }
-  .btn-ghost { background: transparent; border-color: var(--elevated); }
+  .btn-primary { background: var(--action); border-color: var(--action); color: #fff; }
+  .btn-primary:hover { background: var(--action-hover); border-color: var(--action-hover); }
+  .btn-ghost { background: transparent; }
   .btn-ghost:hover { background: var(--raised); }
+  @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 
   /* ── hero: full viewport minus the bar, centred, gradient-faded edges ── */
   .hero { position: relative; min-height: calc(100dvh - 64px); overflow: hidden; display: flex; align-items: center; justify-content: center; }
@@ -118,10 +129,15 @@
   .hero .sub { font-size: var(--p1); color: var(--body); max-width: 52ch; line-height: 1.6; }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 8px; }
   .row-left { justify-content: flex-start; margin-top: 32px; }
-  .kicker { font-size: var(--l5); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .kicker {
+    display: inline-block; align-self: center; padding: 5px 10px;
+    border: var(--edge); font-size: var(--l5); letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--body);
+  }
 
   /* ── sections ─────────────────────────────────────────────────────────── */
-  section.band { padding: var(--band) 0; }
+  section.band { padding: var(--band) 0; border-top: var(--edge); }
+  section.band:first-of-type { border-top: 0; }
   .band-head { display: flex; flex-direction: column; gap: 14px; align-items: center; text-align: center; margin: 0 auto clamp(32px, 4vw, 44px); max-width: 760px; }
   .band-head p { font-size: var(--p1); color: var(--body); max-width: 56ch; line-height: 1.6; }
 
@@ -130,19 +146,27 @@
   @media (max-width: 980px) { .grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
   .card {
-    background: var(--card); border-radius: var(--radius); padding: clamp(22px, 2.4vw, 28px);
+    background: var(--card); border: var(--edge); border-radius: var(--radius);
+    box-shadow: var(--lift); padding: clamp(22px, 2.4vw, 28px);
     display: flex; flex-direction: column; gap: 26px; justify-content: space-between; height: 100%;
   }
   .card-top { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; }
-  .card-top svg { width: 56px; height: 56px; color: var(--heading); }
+  /* Boxed, so the icon reads as a labelled component rather than a floating glyph — the
+     brutalist habit of showing the container. Stroke stays at the reference's 1.5. */
+  .card-icon {
+    display: grid; place-items: center; width: 52px; height: 52px;
+    border: var(--edge); background: var(--raised);
+  }
+  .card-icon svg { width: 26px; height: 26px; color: var(--heading); }
   .card-txt { display: flex; flex-direction: column; gap: 10px; }
   .card p { font-size: var(--p4); color: var(--muted); line-height: 1.6; }
 
   /* ── the record: four figures on card surfaces ────────────────────────── */
   .figs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
   @media (max-width: 900px) { .figs { grid-template-columns: repeat(2, 1fr); } }
-  .fig { background: var(--card); border-radius: var(--radius); padding: clamp(20px, 2.2vw, 26px); }
-  .fig dt { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
+  .fig { background: var(--card); border: var(--edge); border-radius: var(--radius); box-shadow: var(--lift); padding: clamp(20px, 2.2vw, 26px); }
+  /* A rule under the label rather than a gap: brutalism divides with lines, not whitespace. */
+  .fig dt { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding-bottom: 12px; margin-bottom: 14px; border-bottom: var(--edge); }
   /* Its own clamp rather than --h2: these are figures, not headings, and one of them is
      "-3,196.65" — nine tabular-width glyphs, which at heading size overflowed a quarter
      of the row. */
@@ -158,26 +182,39 @@
   .code { position: relative; }
   pre {
     margin: 0; padding: 20px 80px 20px 20px; overflow-x: auto;
-    background: var(--raised); border-radius: var(--radius);
+    background: var(--raised); border: var(--edge); border-radius: var(--radius);
+    box-shadow: var(--lift);
     font-family: inherit; font-size: var(--p4); line-height: 1.7; color: var(--heading);
   }
   .copy {
-    position: absolute; top: 10px; right: 10px; height: 30px; padding: 0 11px;
-    border-radius: 8px; border: 1px solid var(--elevated); background: var(--card);
+    position: absolute; top: 12px; right: 12px; height: 30px; padding: 0 11px;
+    border-radius: var(--radius); border: var(--edge-strong); background: var(--card);
     color: var(--body); font: inherit; font-size: var(--l5); cursor: pointer;
+    box-shadow: var(--lift-sm); transition: transform .08s, box-shadow .08s;
   }
   .copy:hover { color: var(--heading); background: var(--elevated); }
+  .copy:active { transform: translate(3px, 3px); box-shadow: none; }
 
   /* ── setup tabs ───────────────────────────────────────────────────────── */
   .tabs { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
   .tab {
     height: 42px; padding: 0 18px; border-radius: var(--radius);
-    background: var(--card); border: 1px solid transparent; color: var(--muted);
+    background: var(--card); border: var(--edge); color: var(--muted);
     font: inherit; font-size: var(--l4); font-weight: 600; cursor: pointer;
+    transition: transform .08s, box-shadow .08s, background .12s, color .12s;
   }
   .tab:hover { color: var(--heading); background: var(--raised); }
-  .tab[aria-selected="true"] { background: var(--raised); color: var(--heading); border-color: var(--action); }
-  .panel { background: var(--card); border-radius: var(--radius); padding: clamp(22px, 2.4vw, 28px); }
+  /* Selected reads as pressed IN — border brightens, shadow gone, element sits in its own
+     offset. The accent stays reserved for the mark and the one primary button. */
+  .tab[aria-selected="true"] {
+    background: var(--raised); color: var(--heading); border: var(--edge-strong);
+    box-shadow: none; transform: translate(3px, 3px);
+  }
+  .tab[aria-selected="false"] { box-shadow: var(--lift-sm); }
+  .panel {
+    background: var(--card); border: var(--edge); border-radius: var(--radius);
+    box-shadow: var(--lift); padding: clamp(22px, 2.4vw, 28px);
+  }
   .panel[hidden] { display: none; }
   .panel h4 { margin-bottom: 10px; }
   .panel .note { font-size: var(--p4); color: var(--muted); line-height: 1.7; margin-bottom: 22px; max-width: 68ch; }
@@ -185,7 +222,7 @@
   .panel > .step:first-of-type { margin-top: 0; }
 
   /* ── footer ───────────────────────────────────────────────────────────── */
-  footer { padding: clamp(48px, 6vw, 64px) 0 clamp(56px, 7vw, 88px); border-top: 1px solid rgba(255,255,255,0.06); }
+  footer { padding: clamp(48px, 6vw, 64px) 0 clamp(56px, 7vw, 88px); border-top: var(--edge); }
   .foot { display: flex; flex-wrap: wrap; gap: clamp(28px, 4vw, 48px); justify-content: space-between; }
   .foot h5 { margin: 0 0 14px; font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
   .foot a { display: block; padding: 3px 0; font-size: var(--p4); color: var(--body); text-decoration: none; }
@@ -249,11 +286,11 @@
     <div class="grid">
       <div class="card">
         <div class="card-top">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M3 17.5 8 11l4 3.5L21 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M15 5h6v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M3 21h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
+          </svg></div>
           <div class="card-txt">
             <h4>Prices its own opinion</h4>
             <p>
@@ -267,9 +304,9 @@
       </div>
       <div class="card">
         <div class="card-top">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          </svg></div>
           <div class="card-txt">
             <h4>Trusts only what it measured</h4>
             <p>
@@ -282,10 +319,10 @@
       </div>
       <div class="card">
         <div class="card-top">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 3l8 3.5v5c0 4.5-3.2 8.4-8 9.5-4.8-1.1-8-5-8-9.5v-5L12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
             <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          </svg></div>
           <div class="card-txt">
             <h4>Refuses on its own terms</h4>
             <p>
@@ -467,40 +504,44 @@ signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
   if (!cv) return;
   const ctx = cv.getContext('2d');
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let pts = [], w = 0, h = 0, raf = 0;
+  const CELL = 64;
+  let cells = [], w = 0, h = 0, raf = 0, off = 0;
 
   const size = () => {
     const r = Math.min(devicePixelRatio || 1, 2);
     w = cv.clientWidth; h = cv.clientHeight;
     cv.width = Math.floor(w * r); cv.height = Math.floor(h * r);
     ctx.setTransform(r, 0, 0, r, 0, 0);
-    /* Count scales with area so a phone does not run a laptop's particle budget. */
-    const n = Math.max(18, Math.min(70, Math.round((w * h) / 26000)));
-    pts = Array.from({ length: n }, () => ({
-      x: Math.random() * w, y: Math.random() * h,
-      vx: (Math.random() - 0.5) * 0.16, vy: (Math.random() - 0.5) * 0.16,
+    /* Filled-cell count scales with area, so a phone does not draw a laptop's workload. */
+    const cols = Math.ceil(w / CELL), rows = Math.ceil(h / CELL);
+    const n = Math.max(6, Math.min(22, Math.round((cols * rows) / 14)));
+    cells = Array.from({ length: n }, () => ({
+      cx: Math.floor(Math.random() * cols), cy: Math.floor(Math.random() * rows),
+      s: 0.25 + Math.random() * 0.5, p: Math.random() * 6.2832,
     }));
   };
 
   const frame = () => {
     ctx.clearRect(0, 0, w, h);
-    for (const p of pts) {
-      p.x += p.vx; p.y += p.vy;
-      if (p.x < 0 || p.x > w) p.vx *= -1;
-      if (p.y < 0 || p.y > h) p.vy *= -1;
-    }
+    /* A ruled grid rather than a particle field. Drifting dots are a soft, decorative
+       idiom and read as the opposite of this design; a grid is structure, which is the
+       whole argument of a brutalist page. Lines are near-invisible on purpose — this is
+       a backdrop, and one that competes with the headline has failed. */
     ctx.lineWidth = 1;
-    for (let i = 0; i < pts.length; i++) {
-      for (let j = i + 1; j < pts.length; j++) {
-        const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 > 20000) continue;
-        ctx.strokeStyle = 'rgba(255,255,255,' + (0.05 * (1 - d2 / 20000)).toFixed(3) + ')';
-        ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
-      }
+    ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+    ctx.beginPath();
+    for (let x = (off % CELL) - CELL; x < w + CELL; x += CELL) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+    for (let y = (off % CELL) - CELL; y < h + CELL; y += CELL) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    ctx.stroke();
+    /* A few cells filled, fading in and out on their own offset phase, so the grid is
+       alive without anything actually moving. */
+    const t = performance.now() / 1000;
+    for (const c of cells) {
+      const a = 0.06 * (0.5 + 0.5 * Math.sin(t * c.s + c.p));
+      ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+      ctx.fillRect(c.cx * CELL, c.cy * CELL, CELL, CELL);
     }
-    ctx.fillStyle = 'rgba(255,255,255,0.20)';
-    for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y, 1.1, 0, 6.2832); ctx.fill(); }
+    off += 0.06;
     raf = requestAnimationFrame(frame);
   };
 
