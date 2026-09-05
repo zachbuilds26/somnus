@@ -67,6 +67,23 @@ export interface RunOpts {
   onProgress?: Report;
 }
 
+/** How old the cycle's spot reading may get before it is re-read, mid-loop.
+ *
+ *  Half of the operator's `maxDataAgeMs`, so a rebuild always happens BEFORE the gate
+ *  would reject — the remaining half is headroom for the book read and the gates that
+ *  follow it. Refreshing at the limit itself would make every decision a coin flip
+ *  against its own deadline.
+ *
+ *  Floored at 2s so an operator who sets a very tight `maxDataAgeMs` does not turn every
+ *  window in the shortlist into its own pair of feed reads.
+ *
+ *  Exported for the test that pins the one property that matters: strictly below the
+ *  limit it protects. Raise this above `maxDataAgeMs` and the refresh becomes decorative
+ *  — the cycle would still reject its own decisions, just after having paid to re-read. */
+export function signalRefreshThresholdMs(maxDataAgeMs: number): number {
+  return Math.max(2_000, Math.floor(maxDataAgeMs / 2));
+}
+
 export function runCycle(opts?: RunOpts): Promise<CycleResult> {
   if (cycleInFlight) {
     debug('runCycle: joining in-flight cycle instead of starting a second');
@@ -176,22 +193,60 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
       `${provisionalTake.length} provisional (${provisionalTake.map((s) => s.policy.label).join(',') || 'none'})`,
   );
 
-  // One spot + volatility read per asset for the whole cycle, not per market.
+  // One spot + volatility read per asset — but NOT one for the whole cycle.
+  //
+  // It used to be exactly that: read once, then judge every decision in the cycle
+  // against those frozen timestamps. The problem is that a cycle is not instantaneous.
+  // Each order that reaches the chain waits ~10s for confirmation, and `dataFresh`
+  // refuses anything past `maxDataAgeMs` (15s by default) — so after the second
+  // submission the cycle's own price reading was older than its own freshness rule, and
+  // every remaining decision was rejected as stale no matter how much edge it had.
+  // `maxOrdersPerCycle: 5` could not mean more than 2, and before the balance read was
+  // moved out of the loop it could not mean more than 1.
+  //
+  // So the context is rebuilt when it gets old, mid-loop. A rebuild is two reads per
+  // asset (~2.8s for two assets) against a 10s chain wait, which is a good trade for
+  // decisions that are actually priced on current data rather than merely permitted by
+  // a gate. Refreshing on ELAPSED TIME rather than after each submit is deliberate: a
+  // slow book read or an indexer stall ages the context just as effectively as a fill,
+  // and a time-based trigger covers every cause including the ones not yet met.
+  const assets = subset.map((s) => s.market.asset);
+  const emptyCtx = () => ({
+    spot: new Map<string, number>(),
+    closes: new Map<string, number[]>(),
+    spotTs: new Map<string, number>(),
+    candleTs: new Map<string, number>(),
+  });
   let ctx;
+  let ctxBuiltAt = Date.now();
   try {
-    ctx = await buildSignalContext(subset.map((s) => s.market.asset));
+    ctx = await buildSignalContext(assets);
   } catch (err) {
     warn('runCycle: signal context failed', err);
-    ctx = {
-      spot: new Map<string, number>(),
-      closes: new Map<string, number[]>(),
-      spotTs: new Map<string, number>(),
-      candleTs: new Map<string, number>(),
-    };
+    ctx = emptyCtx();
   }
   if (ctx.spot.size === 0) {
     errors.push('price feed returned no spot — falling back to consensus (agent will not trade)');
   }
+
+  /** Rebuild before the context can breach the freshness rule, not after.
+   *
+   *  Half of `maxDataAgeMs` leaves room for the book read and the gates that follow, so
+   *  a decision is priced on data comfortably inside the limit rather than right at it.
+   *  A failed rebuild keeps the old context: the freshness gate then rejects exactly as
+   *  it did before, which is the correct outcome and not a crash. */
+  const refreshAfterMs = signalRefreshThresholdMs(rules.maxDataAgeMs);
+  const refreshContextIfStale = async (): Promise<void> => {
+    const age = Date.now() - ctxBuiltAt;
+    if (age < refreshAfterMs) return;
+    report(`re-reading spot after ${Math.round(age / 1000)}s — pricing on current data`);
+    try {
+      ctx = await buildSignalContext(assets);
+      ctxBuiltAt = Date.now();
+    } catch (err) {
+      debug('runCycle: mid-cycle signal refresh failed, keeping the previous reading:', String(err));
+    }
+  };
 
   let scanned = 0;
   for (const { market: mk, policy } of subset) {
@@ -201,6 +256,7 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
       subset.length,
     );
     scanned += 1;
+    await refreshContextIfStale();
     try {
       const book = await eventBook(mk.symbol, 5);
       books.push(book);
