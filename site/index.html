@@ -126,7 +126,8 @@
   .hero h1 { max-width: 24ch; }
   .hero .sub { font-size: var(--p1); color: var(--body); max-width: 52ch; line-height: 1.6; }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 8px; }
-  .row-left { justify-content: flex-start; margin-top: 32px; }
+  /* Its own rule rather than an override of the centring class it used to piggyback on. */
+  .btn-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
   .kicker {
     display: inline-block; align-self: center; padding: 5px 10px;
     border: var(--edge); font-size: var(--l5); letter-spacing: 0.16em;
@@ -159,8 +160,20 @@
   .card-txt { display: flex; flex-direction: column; gap: 10px; }
   .card p { font-size: var(--p4); color: var(--muted); line-height: 1.6; }
 
+  /* ── one centred content column ───────────────────────────────────────────
+     The band heads are centred inside a 760px box; the content under them was
+     left-aligned inside the 1200px wrap. So a head began around x=220 while the code
+     block below it began at x=0, and every section looked knocked out of line. This puts
+     text-and-code content on the same centre axis as its own heading. Grids stay full
+     width, because a symmetric grid is already centred. */
+  .col { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  .col > .step { margin: 6px 0 0; }
+  .col > .prose { margin-top: 6px; }
+
   /* Measure, not container width. 78ch of monospace is over 700px — well past the ~70
-     characters a line can carry before the eye loses its place returning. */
+     characters a line can carry before the eye loses its place returning. Left-aligned
+     inside the column so prose and code share a left edge; only the right is ragged,
+     which is what a measure is supposed to do. */
   .prose { display: flex; flex-direction: column; gap: 18px; margin-top: clamp(32px, 4vw, 44px); }
   .prose p { font-size: var(--p3); color: var(--body); line-height: 1.7; max-width: 66ch; }
   .prose strong { color: var(--heading); font-weight: 600; }
@@ -168,11 +181,14 @@
   /* ── code blocks ──────────────────────────────────────────────────────── */
   .code { position: relative; }
   pre {
-    margin: 0; padding: 20px 80px 20px 20px; overflow-x: auto;
+    margin: 0; padding: 20px; overflow-x: auto;
     background: var(--raised); border: var(--edge); border-radius: var(--radius);
     box-shadow: var(--lift);
     font-family: inherit; font-size: var(--p4); line-height: 1.7; color: var(--heading);
   }
+  /* Only the blocks that HAVE a Copy button reserve room for one. The flat rule left 80px
+     of dead space on the right of every output block that has none. */
+  .code pre { padding-right: 80px; }
   .copy {
     position: absolute; top: 12px; right: 12px; height: 30px; padding: 0 11px;
     border-radius: var(--radius); border: var(--edge-strong); background: var(--card);
@@ -337,30 +353,33 @@
       </p>
     </div>
 
-    <div class="code">
-<pre>curl -s -X POST https://somnus-backend.onrender.com/api/proof/verify \
-  -H 'content-type: application/json' -d '{}'</pre>
-      <button class="copy" type="button">Copy</button>
-    </div>
+    <div class="col">
 
-    <p class="step">What it answered on 5 September 2026</p>
-    <pre>linkage, every entry          PASS    2,885 checked
-recomputed head matches       PASS
-signatures valid              PASS    400 of 400
-older signatures out of scope 2,399 — pageable
-unsigned historical entries   152 — reported, not hidden
-signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
+      <div class="code">
+  <pre>curl -s -X POST https://somnus-backend.onrender.com/api/proof/verify \
+    -H 'content-type: application/json' -d '{}'</pre>
+        <button class="copy" type="button">Copy</button>
+      </div>
 
-    <div class="prose">
-      <p>
-        Signature recovery costs about 36 ms an entry, so one request checks linkage over
-        everything and signatures over the most recent 400, reporting exactly what it skipped. That
-        limit exists because leaving it off made a single anonymous request cost 78 seconds of CPU —
-        found while auditing this project, and fixed rather than hidden.
-      </p>
-    </div>
-    <div class="hero-cta row-left">
-      <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/proof">Browse the chain</a>
+      <p class="step">What it answered on 5 September 2026</p>
+      <pre>linkage, every entry          PASS    2,885 checked
+  recomputed head matches       PASS
+  signatures valid              PASS    400 of 400
+  older signatures out of scope 2,399 — pageable
+  unsigned historical entries   152 — reported, not hidden
+  signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
+
+      <div class="prose">
+        <p>
+          Signature recovery costs about 36 ms an entry, so one request checks linkage over
+          everything and signatures over the most recent 400, reporting exactly what it skipped. That
+          limit exists because leaving it off made a single anonymous request cost 78 seconds of CPU —
+          found while auditing this project, and fixed rather than hidden.
+        </p>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/proof">Browse the chain</a>
+      </div>
     </div>
   </div>
 </section>
@@ -382,12 +401,14 @@ signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
     <div class="tabs" role="tablist" aria-label="Choose your coding agent"></div>
     <div id="panels"></div>
 
-    <div class="prose">
-      <p>
-        Every one of these is really just pointing at
-        <code>https://somnus-backend.onrender.com/mcp</code>. For a client that only speaks stdio,
-        bridge it: <code>npx -y mcp-remote https://somnus-backend.onrender.com/mcp</code>.
-      </p>
+    <div class="col">
+      <div class="prose">
+        <p>
+          Every one of these is really just pointing at
+          <code>https://somnus-backend.onrender.com/mcp</code>. For a client that only speaks stdio,
+          bridge it: <code>npx -y mcp-remote https://somnus-backend.onrender.com/mcp</code>.
+        </p>
+      </div>
     </div>
   </div>
 </section>
