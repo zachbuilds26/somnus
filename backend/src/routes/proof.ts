@@ -53,8 +53,37 @@ proofRouter.get('/proof/anchor', (_req, res) => {
  *  Reachable without the gateway key (see `KEY_EXEMPT_PATHS`), because "anyone can
  *  audit the chain" is the project's central claim and a POST that needs a secret
  *  does not deliver it. It is a POST only because it takes a body — it mutates
- *  nothing. The entry cap below is what makes that safe to expose.            */
+ *  nothing.
+ *
+ *  ── Why there are THREE limits and not one ──────────────────────────────────
+ *
+ *  Opening this route without also bounding its cost was a denial of service, and a
+ *  measured one rather than a theoretical one: an empty body means "verify everything",
+ *  which was 2,799 ECDSA public-key recoveries at ~36ms each — 78 seconds of CPU on the
+ *  live free instance, from one unauthenticated request, growing with the chain forever.
+ *  `MAX_VERIFY_ENTRIES` did not help, because it only ever bounded CALLER-SUPPLIED
+ *  slices; omitting `entries` skipped it entirely.
+ *
+ *  So: linkage is cheap and always runs over everything (1.2s for 2,885 entries, and
+ *  it is the primary guarantee). Signature recovery is the expensive half, so it is
+ *  bounded per request and the response says exactly how many were checked and how to
+ *  check the rest. And the whole result is cached against the chain head, so repeated
+ *  requests — the actual attack — cost nothing at all, while a genuine auditor after
+ *  the next append still gets a fresh answer.                                      */
 const MAX_VERIFY_ENTRIES = 5_000;
+
+/** Signature recoveries any ONE request may spend, whatever it asks for.
+ *
+ *  Most recent first: a reader checking whether the chain is honest cares far more
+ *  about the entries written since they last looked than about entry 12 from August.
+ *  Everything else stays reachable through `prevAnchor`/`entries` paging. */
+const MAX_SIGNATURE_CHECKS = Number(process.env.SOMNUS_MAX_SIGNATURE_CHECKS ?? 400);
+
+/** Full-chain verification is deterministic for a given head, so it is worth computing
+ *  once. Keyed on the anchor AND the entry count: the anchor alone would be enough in
+ *  practice, but two keys make a stale hit impossible rather than merely unlikely, and
+ *  the cost of being wrong here is reporting a verification that never happened. */
+let verifyCache: { anchor: string; entries: number; body: Record<string, unknown> } | undefined;
 
 proofRouter.post('/proof/verify', async (req, res) => {
   try {
@@ -69,11 +98,25 @@ proofRouter.post('/proof/verify', async (req, res) => {
           `${body.entries.length} entries exceeds the ${MAX_VERIFY_ENTRIES} per-request limit — ` +
           'each one costs a signature recovery. Verify in pages, or omit `entries` to have the ' +
           'server verify its own full chain from genesis.',
+        note:
+          'the request body is also capped at 1mb by the JSON parser, which at ~866 bytes ' +
+          'per entry binds first at roughly 1,200 entries',
       });
       return;
     }
 
     const isSlice = Array.isArray(body.entries) || typeof body.prevAnchor === 'string';
+
+    // Serve a cached full-chain answer when the chain has not moved. Only for the
+    // default request: a caller-supplied slice is a different question every time.
+    if (!isSlice && verifyCache) {
+      const anchorNow = currentAnchor();
+      if (verifyCache.anchor === anchorNow && verifyCache.entries === count()) {
+        res.json({ ...verifyCache.body, cached: true });
+        return;
+      }
+    }
+
     const prev: string = typeof body.prevAnchor === 'string' ? body.prevAnchor : '0'.repeat(64);
     const all = readAllFromDisk();
 
@@ -93,11 +136,19 @@ proofRouter.post('/proof/verify', async (req, res) => {
 
     // Hash linkage proves nothing was reordered; signatures prove who wrote it.
     // Checking only linkage lets an "unsigned" or foreign-signed chain pass.
+    //
+    // Linkage above covered every entry — it is cheap. Signature recovery is not, so it
+    // runs over the most recent `MAX_SIGNATURE_CHECKS` and no further. Newest first,
+    // because a reader asking whether this chain is honest cares about what was written
+    // since they last looked, not about entry 12 from August; the rest stays reachable
+    // by paging with `prevAnchor`/`entries`.
     const expected = signerAddress();
     let signaturesChecked = 0;
     let signaturesValid = 0;
     let unsigned = 0;
-    for (const e of slice) {
+    let signaturesSkipped = 0;
+    for (let i = slice.length - 1; i >= 0; i--) {
+      const e = slice[i]!;
       // Count unsigned entries whether or not a signer is configured. Counting
       // them only when one exists reports "unsignedEntries: 0" for a chain where
       // NOTHING is signed — which reads as "all good" rather than "unverifiable".
@@ -106,13 +157,21 @@ proofRouter.post('/proof/verify', async (req, res) => {
         continue;
       }
       if (!expected) continue; // signed, but we have no address to check against
+      if (signaturesChecked >= MAX_SIGNATURE_CHECKS) {
+        signaturesSkipped++;
+        continue;
+      }
       signaturesChecked++;
       const proofHash = computeHash(e.prevHash, e.payloadHash, e.kind);
       if (await verifyProofSignature(proofHash, e.signature, expected)) signaturesValid++;
     }
 
     const signaturesOk = signaturesChecked === signaturesValid;
-    res.json({
+    const payload: Record<string, unknown> = {
+      // `ok` deliberately does NOT claim more than was done. Linkage covered everything;
+      // signatures covered a bounded window, and `signaturesSkipped` says how much was
+      // left. Reporting ok:true while silently skipping 2,400 recoveries would be the
+      // same class of lie this whole route exists to prevent.
       ok: result.ok && headMatches !== false && signaturesOk,
       linkageOk: result.ok,
       headMatches,
@@ -120,6 +179,18 @@ proofRouter.post('/proof/verify', async (req, res) => {
       signaturesChecked,
       signaturesValid,
       signaturesOk,
+      ...(signaturesSkipped > 0
+        ? {
+            signaturesSkipped,
+            signatureCoverage:
+              `signatures were verified over the most recent ${signaturesChecked} signed ` +
+              `entries; ${signaturesSkipped} older ones were not checked in this request. ` +
+              'Linkage covered all ' +
+              `${result.checked}. Page through the rest with {prevAnchor, entries}, or raise ` +
+              'SOMNUS_MAX_SIGNATURE_CHECKS on a host that can afford it — each check is an ' +
+              'ECDSA recovery at roughly 36ms.',
+          }
+        : {}),
       unsignedEntries: unsigned,
       // Be explicit rather than let a reader infer from zeros — and say WHICH of the two
       // reasons applies. "not signed" was previously printed whenever no signer was
@@ -138,7 +209,10 @@ proofRouter.post('/proof/verify', async (req, res) => {
       onChainAnchor: lastAnchorInfo(),
       checked: result.checked,
       total: count(),
-    });
+    };
+    // Cache only the default question, and only once it is fully answered.
+    if (!isSlice) verifyCache = { anchor: reported, entries: count(), body: payload };
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ ok: false, error: (err as Error).message ?? String(err) });
   }

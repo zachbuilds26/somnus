@@ -13,7 +13,7 @@ Built for the **Somnia × DreamDEX Event Contracts Hackathon**. Testnet-first.
 1. **Watches live markets** — pulls Event Contract windows (Up/Down) and order books from DreamDEX via the Somnia Markets SDK
 2. **Thinks for itself** — computes a fair probability using driftless GBM with horizon-matched volatility (not naive sqrt-scaling), compares it to the book, and only acts when there's genuine edge
 3. **Respects your limits** — max trade size, max open positions, max open exposure, min edge, daily loss cap, loss streak, execution failures, data freshness — all enforced server-side, not in the UI
-4. **Leaves a paper trail** — every decision, order, claim, and config change goes into a hash-chained, optionally signed JSONL log. `POST /proof/verify` lets anyone audit the chain end-to-end, and means it: the route is exempt from the gateway key, since a public audit that needs the operator's secret is not one. Caller-supplied slices are capped at 5,000 entries per request, because each entry costs a signature recovery.
+4. **Leaves a paper trail** — every decision, order, claim, and config change goes into a hash-chained, optionally signed JSONL log. `POST /proof/verify` lets anyone audit the chain end-to-end, and means it: the route is exempt from the gateway key, since a public audit that needs the operator's secret is not one. Because it takes no key, its cost is bounded three ways — linkage over everything (cheap), signature recovery over the most recent 400 signed entries with the remainder reported and pageable, and a result cached against the chain head. [Why](#bounding-a-keyless-verifier).
 5. **Runs autonomously** — start the loop and it runs non-overlapping cycles on your interval. Or call `POST /agent/run` for a one-off.
 
 **Is it profitable? No — and the ledger says so in public.** Realised P&L is -3,196 tUSDC over 76 settled trades. Roughly 95% of that came from four oversized trades in a ninety-second window on 30 August, caused by two bugs this repo's own instrumentation caught and fixed — one of which recorded a winning trade as a loss. [The full account is below](#the--3196-on-the-pnl-and-what-actually-caused-it), reconstructed entirely from the ledger and the audit chain. The number stays on the record because a figure that looks better and cannot be interrogated would be worth less.
@@ -226,6 +226,24 @@ Optionally signed with secp256k1. `POST /proof/verify` checks:
 
 Linkage alone isn't enough (a drifted anchor passes link checks while being wrong). Signatures alone aren't enough (an unsigned chain would pass). You need all three.
 
+### Bounding a keyless verifier
+
+`POST /proof/verify` takes no gateway key, on purpose — a public audit that needs the operator's secret is not a public audit. That decision has a cost, and it was measured rather than guessed: an empty body means *verify everything*, which was one ECDSA public-key recovery per signed entry. On the live deployment, **2,799 recoveries and 78 seconds of CPU from a single unauthenticated request**, growing with the chain forever. A ceiling on caller-supplied `entries` did nothing about it, because omitting `entries` skipped that path entirely.
+
+Three limits, each doing a different job:
+
+| Limit | Why |
+| --- | --- |
+| Linkage over **every** entry | The primary guarantee, and cheap — 1.2s for 2,885 entries. Never bounded. |
+| Signature recovery over the most recent **400** signed entries | The expensive half, ~36ms each. `signaturesSkipped` and `signatureCoverage` report exactly what was left; page the rest with `{prevAnchor, entries}`. Tunable via `SOMNUS_MAX_SIGNATURE_CHECKS`. |
+| Result cached against the chain head | Repeated requests — the actual attack — cost nothing, while a genuine auditor after the next append still gets a fresh answer. |
+
+Underneath all three, signature results are memoised per `(hash, signature, address)`. Those inputs are immutable once an entry is written, so verification was re-answering thousands of identical questions on every call. The key is the whole triple: memoising on the hash alone would let a valid signature over one entry vouch for another, which is the exact forgery this route exists to detect.
+
+Measured on a 2,885-entry chain: **78s → 9.2s** cold, **0.01s** on repeat, and **0.30s** for the same work with the response cache deliberately bypassed — that last figure is the memo alone.
+
+`ok: true` never claims more than was checked. Linkage covers everything; signatures cover a bounded window, and the response says how big that window was.
+
 ### What is in the chain, and whose
 
 Two different records, and the difference matters if you use the hosted endpoint:
@@ -301,7 +319,7 @@ Run `npm run horizon-study` to re-score and promote/demote tiers. The agent pick
 
 ```bash
 npm run typecheck     # tsc --noEmit
-npm test              # 239 unit + regression tests, no network, no keys
+npm test              # 245 unit + regression tests, no network, no keys
 npm run doctor        # read-only connectivity probe (no keys needed)
 npm run faucet        # mint test tUSDC to trade key (testnet)
 npm run claim         # report claimable settled positions
