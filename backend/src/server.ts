@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config, log, warn } from './config';
 import { setSigner } from './services/store';
 import { createConfiguredSigner } from './services/proof';
@@ -93,8 +95,34 @@ if (config.apiKey) {
   });
 }
 
-app.get('/', (_req, res) => {
-  res.json({ ok: true, service: 'somnus-backend', docs: '/api/health' });
+/** The landing page, served from this same process.
+ *
+ *  One service, one URL, one deploy — and because the page and the API share an origin, its
+ *  live figures need no CORS entry and cannot drift onto a different deployment's data. The
+ *  page reads `/api/health`, `/api/agent/pnl` and `/api/proof/verify` at load, so every
+ *  number on it is this server's own.
+ *
+ *  Mounted BEFORE the API routers only in file order, not in precedence: `express.static`
+ *  answers a path when a matching file exists and calls `next()` when it does not, so
+ *  `/api/*`, `/ping` and `/metrics` are untouched — there is no `api` directory in
+ *  `public/`. Registered after the CORS and gateway-key middleware above so the page is
+ *  subject to the same policy as everything else.
+ *
+ *  `index: 'index.html'` is the default and left implicit; `extensions` is not enabled, so
+ *  `/setup` does not silently resolve to `setup.html`. One page, one path. */
+app.use(express.static(join(dirname(fileURLToPath(import.meta.url)), '..', 'public'), {
+  maxAge: '5m',
+  // The page is worthless without live data, so a long cache would show a judge yesterday's
+  // numbers. Five minutes is enough to survive a reload, short enough to stay honest.
+}));
+
+/** Machine-readable service descriptor, for anything that used to GET `/`.
+ *
+ *  `/` now returns HTML, so a script expecting the old JSON needs somewhere to go. Kept as
+ *  a real route rather than dropped, because breaking a caller silently to make room for a
+ *  landing page would be a poor trade. */
+app.get('/api', (_req, res) => {
+  res.json({ ok: true, service: 'somnus-backend', docs: '/api/health', page: '/' });
 });
 
 app.use('/api', healthRouter);
