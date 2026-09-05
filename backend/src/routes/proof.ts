@@ -121,10 +121,17 @@ proofRouter.post('/proof/verify', async (req, res) => {
       signaturesValid,
       signaturesOk,
       unsignedEntries: unsigned,
-      // Be explicit rather than let a reader infer from zeros.
+      // Be explicit rather than let a reader infer from zeros — and say WHICH of the two
+      // reasons applies. "not signed" was previously printed whenever no signer was
+      // configured, which is false for a chain whose entries carry signatures this
+      // server simply has no address to check. Set SOMNUS_PROOF_SIGNER to check them.
       signatureNote: expected
         ? undefined
-        : 'no signing key configured — entries are hash-chained but not signed',
+        : slice.some((e) => typeof e.signature === 'string' && e.signature.length > 0)
+          ? 'this chain IS signed, but no signer address is configured here to verify against — ' +
+            'set SOMNUS_PROOF_SIGNER to the expected address (an address grants no authority)'
+          : 'no signing key configured and no entry carries a signature — this chain is ' +
+            'hash-linked only',
       malformedEntriesIgnored: rejected,
       anchor: result.anchor,
       reportedAnchor: reported,

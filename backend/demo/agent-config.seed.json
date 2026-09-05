@@ -1,0 +1,27 @@
+{
+  "maxTradeSize": 2,
+  "maxOpenPositions": 10,
+  "minEdge": 0.01,
+  "edgePreset": "middle",
+  "intervalMs": 60000,
+  "maxOrdersPerCycle": 5,
+  "maxPerMarket": 1,
+  "tradeQuota": null,
+  "maxDailyLoss": 50,
+  "maxOpenNotional": 1000,
+  "maxDrawdown": 0,
+  "maxTradeSizePctEquity": 0,
+  "maxPerExpiryBucket": 2,
+  "maxSameDirection": 0,
+  "maxSettlementAgeMs": 1800000,
+  "maxConsecutiveLosses": 25,
+  "maxExecutionFailures": 5,
+  "maxDataAgeMs": 15000,
+  "tradingPaused": false,
+  "symbols": [
+    "BTC",
+    "ETH"
+  ],
+  "mode": "dry-run",
+  "claimEnabled": true
+}

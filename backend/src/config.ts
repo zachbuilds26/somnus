@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -110,6 +111,54 @@ export const config: SomnusConfig = readConfig();
  *  corrupted test. `npm test` sets it to a temp dir. */
 export const DATA_DIR =
   process.env.DATA_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
+
+/** Give a container with no persistent disk a real history to start from.
+ *
+ *  Render's free tier has no disk, so `DATA_DIR` is recreated whenever the container is —
+ *  every deploy, and every wake from the idle spin-down. The proof chain and the P&L
+ *  ledger start from zero each time, which makes the project's central claim ("prove it
+ *  actually placed the trades it claims") answer with an empty list. A disk is the real
+ *  fix and it needs a paid plan.
+ *
+ *  So: two snapshots committed under `backend/demo/`, COPIED into `DATA_DIR` when it has
+ *  none. Copied rather than read, deliberately — every consumer downstream (append,
+ *  paging, `readAllFromDisk`, verification, the ledger cache) then works against an
+ *  ordinary file with no special case anywhere, and the running agent genuinely continues
+ *  the chain rather than shadowing it.
+ *
+ *  OPT-IN via `SOMNUS_SEED_DEMO_DATA`, and that matters in both directions. A laptop with
+ *  real history must never have a snapshot laid over it, and the test suite runs against a
+ *  throwaway `DATA_DIR` whose emptiness several tests depend on. Only the hosted demo sets
+ *  it. Never overwrites: if a chain file already exists, this does nothing at all.
+ *
+ *  Runs here rather than in `store.ts` because `store.ts` reads the chain in its module
+ *  body, and every module reaches this file first. */
+function seedDemoDataDir(): void {
+  const raw = (process.env.SOMNUS_SEED_DEMO_DATA ?? '').toLowerCase();
+  if (raw !== 'true' && raw !== '1') return;
+  const seedDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'demo');
+  const pairs: Array<[string, string]> = [
+    ['proof-chain.seed.jsonl', 'proof-chain.jsonl'],
+    ['pnl-ledger.seed.jsonl', 'pnl-ledger.jsonl'],
+    ['agent-config.seed.json', 'agent-config.json'],
+  ];
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    for (const [from, to] of pairs) {
+      const src = join(seedDir, from);
+      const dest = join(DATA_DIR, to);
+      // `existsSync` on the DESTINATION is the whole safety property: a container that
+      // has already been seeded, or a real data dir, is left untouched.
+      if (existsSync(dest) || !existsSync(src)) continue;
+      copyFileSync(src, dest);
+      console.log(`[somnus] seeded ${to} from demo snapshot (no persistent disk configured)`);
+    }
+  } catch (err) {
+    // Non-fatal: a service that cannot seed should boot empty, not refuse to boot.
+    console.warn(`[somnus] demo seed skipped: ${(err as Error).message}`);
+  }
+}
+seedDemoDataDir();
 
 export function log(...args: unknown[]): void {
   const level = config.logLevel;

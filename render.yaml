@@ -57,6 +57,29 @@ services:
       # a book yet. Nothing is broken in that state and all of it reads as broken.
       - key: AGENT_AUTOSTART
         value: true
+      # Start from the operator's real, verifiable history instead of from nothing.
+      #
+      # The free tier has no persistent disk, so DATA_DIR is recreated with the container —
+      # on every deploy AND on every wake from the idle spin-down. Without this the proof
+      # chain is empty, which makes "prove it actually placed the trades it claims" answer
+      # with a blank list, and the P&L record has nothing in it either.
+      #
+      # Copies backend/demo/*.seed.* into DATA_DIR at boot, and only when DATA_DIR has no
+      # file of that name — so a container already running is never overwritten. The
+      # shipped chain is 2,885 entries that verify from genesis: linkage OK, head matches,
+      # 2,799 signatures valid, 86 historical entries unsigned and reported as such.
+      #
+      # A real disk is still the correct fix; see the commented block at the bottom.
+      - key: SOMNUS_SEED_DEMO_DATA
+        value: true
+      # The address the shipped chain's signatures should recover to.
+      #
+      # This deployment holds NO private key — that is the point of the hosted surface. But
+      # a verifier needs an address to check against, and without one /proof/verify could
+      # only report `signaturesChecked: 0` on a chain that is in fact signed. An address
+      # grants no authority; it is what a block explorer shows.
+      - key: SOMNUS_PROOF_SIGNER
+        value: "0xC2187C19bcD588E0eb68d68143Af5D410079C69a"
       - key: AGENT_MAX_TRADE_SIZE
         value: 50
       - key: AGENT_MAX_DAILY_LOSS

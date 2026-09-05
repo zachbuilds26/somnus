@@ -78,8 +78,24 @@ export function resetSigner(): void {
 }
 
 /** Address the chain is signed by, when a signer is configured. */
+/** The address every signature on this chain should recover to.
+ *
+ *  Prefers the configured signer — the wallet this process signs WITH. Falls back to
+ *  `SOMNUS_PROOF_SIGNER`, an address configured for verification ONLY, with no key behind
+ *  it.
+ *
+ *  That fallback is what makes a keyless deployment able to audit a chain it did not
+ *  write. The hosted demo holds no key by design, and it serves a chain seeded from the
+ *  operator's own history: 2,799 of those entries are signed, but with nothing to compare
+ *  them against, `/proof/verify` could only report `signaturesChecked: 0` and say the
+ *  entries were unsigned — which was false, and false in the direction that undersells the
+ *  one guarantee the chain exists to provide. Publishing an ADDRESS gives away no
+ *  authority: it is the same thing a block explorer shows. */
 export function signerAddress(): string | undefined {
-  return activeSigner()?.address;
+  const live = activeSigner()?.address;
+  if (live) return live;
+  const declared = process.env.SOMNUS_PROOF_SIGNER?.trim();
+  return declared && /^0x[0-9a-fA-F]{40}$/.test(declared) ? declared : undefined;
 }
 
 export function chainStateInit(seed?: Partial<{ anchor: string; entries: ChainEntry[] }>): void {
