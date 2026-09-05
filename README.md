@@ -16,6 +16,8 @@ Built for the **Somnia × DreamDEX Event Contracts Hackathon**. Testnet-first.
 4. **Leaves a paper trail** — every decision, order, claim, and config change goes into a hash-chained, optionally signed JSONL log. `POST /proof/verify` lets anyone audit the chain end-to-end, and means it: the route is exempt from the gateway key, since a public audit that needs the operator's secret is not one. Caller-supplied slices are capped at 5,000 entries per request, because each entry costs a signature recovery.
 5. **Runs autonomously** — start the loop and it runs non-overlapping cycles on your interval. Or call `POST /agent/run` for a one-off.
 
+**Is it profitable? No — and the ledger says so in public.** Realised P&L is -3,196 tUSDC over 76 settled trades. Roughly 95% of that came from four oversized trades in a ninety-second window on 30 August, caused by two bugs this repo's own instrumentation caught and fixed — one of which recorded a winning trade as a loss. [The full account is below](#the--3196-on-the-pnl-and-what-actually-caused-it), reconstructed entirely from the ledger and the audit chain. The number stays on the record because a figure that looks better and cannot be interrogated would be worth less.
+
 ---
 
 ## Repository structure
@@ -223,6 +225,52 @@ Optionally signed with secp256k1. `POST /proof/verify` checks:
 3. **Signatures** — every signature recovers to the configured signer
 
 Linkage alone isn't enough (a drifted anchor passes link checks while being wrong). Signatures alone aren't enough (an unsigned chain would pass). You need all three.
+
+### What is in the chain, and whose
+
+Two different records, and the difference matters if you use the hosted endpoint:
+
+| Record | Contains | Public route |
+| --- | --- | --- |
+| Proof chain | **every** order — the agent's own *and* every hosted caller's | `GET /proof`, `GET /agent/logs` |
+| P&L ledger | the **agent's own** trades only | `GET /agent/pnl`, `/metrics` |
+
+So if you trade through `somnus_my_trade`, your order is written into the public audit chain, tagged `via: "mcp-user"` with your wallet address and a non-reversible handle. Your token never appears. Your wallet address is already public on-chain, so nothing is revealed that a block explorer would not show — but **your trades are visible to anyone reading the chain**, by design: an audit trail with parts missing is not one.
+
+Your wins and losses never enter the P&L ledger. That is deliberate rather than incidental: the agent's own loss limits read that ledger, and folding a stranger's outcomes into it would let their bad day trip the operator's circuit breakers. `/agent/pnl` is the agent's own report card and nobody else's.
+
+---
+
+## The -3,196 on the PnL, and what actually caused it
+
+`/agent/pnl` and `/metrics` are public and unauthenticated. They currently read:
+
+```
+fills 76 · closed 76 · win rate 36.8% · realizedPnl -3196.65
+```
+
+That is a real number from a real ledger and it is not being hidden. It is also almost entirely the record of two bugs rather than of the model, and the ledger itself is what makes that provable.
+
+**Four trades, 30 August, inside ninety seconds:**
+
+| Cost | Contracts | Implied price | Outcome |
+| --- | --- | --- | --- |
+| 999.86 | 1976 | 0.5060 | **won**, paid 990 |
+| 999.66 | 2866 | 0.3488 | lost |
+| 999.92 | 4182 | 0.2391 | lost |
+| 999.77 | 2377 | 0.4206 | lost |
+
+Those four cost 3,999 and returned 990. They are **94.7% of all collateral this agent has ever committed**. The other 72 fills risked 449 in total and came out close to flat.
+
+**Bug one: exposure was never checked against the chain.** `maxOpenNotional` was 1,000. Four orders of ~1,000 each landed inside it because the ceiling was compared against a counter this process kept in memory, not against positions actually held on-chain. Fixed in `9ffda05` — `beginCycle` now establishes the open-position baseline from `countOpenByMarket()` before any order is considered.
+
+**Bug two: cost basis was recorded against the requested size.** Look at row one. 1,976 contracts requested at 0.506, 990 actually filled, and the ledger booked 999.86 — a position that really cost ~501 and paid out 990. A 489 **winner**, written into the ledger as a 10 loser. An IOC fills partially and cancels the remainder; the accounting did not know that. Fixed in the same commit — `resolveFill` now reads the filled quantity out of the pool's own `OrderFilled` events.
+
+So the headline loss contains at least one trade that made money, sized by a limit that was not being enforced. `maxTradeSize` is **2** now, and the per-cycle exposure baseline comes from the chain.
+
+**What this is evidence of.** The reason both bugs are describable to this level of detail is the thing the loss is recorded in: every fill carries its requested size, its filled size, the price paid, the model's fair value, the freshness of every input, and a hash linking it to the entry before it. Nothing was reconstructed from memory for this section — the numbers came out of the ledger and the chain, and `POST /proof/verify` will confirm all 2,885 entries independently.
+
+A number that looks better and cannot be interrogated would be worth less. The loss stays on the record.
 
 ---
 
