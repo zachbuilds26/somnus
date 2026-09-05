@@ -15,6 +15,32 @@ import { currentAnchor, count, chainWriteFailure } from '../services/store';
 
 export const healthRouter: Router = Router();
 
+/** Liveness only, on its own router.
+ *
+ *  Separate from `healthRouter` so it can be mounted at BOTH `/ping` and `/api/ping`
+ *  without also exposing the expensive `/health` at two paths — one endpoint, two URLs,
+ *  rather than a whole router duplicated.
+ *
+ *  Exists for an external uptime monitor (UptimeRobot and friends) whose job is to keep a
+ *  free-tier container from spinning down. That means it gets hit every few minutes,
+ *  forever, so it must not do work: no chain reads, no RPC, no external API, no cache to
+ *  miss. `process.uptime()` is a counter the runtime already holds.
+ *
+ *  `/api/health` is NOT the right target for that, and the difference is worth being
+ *  explicit about: health calls `fetchSpotMarkets()` to report indexer state. It caches
+ *  for 10 seconds, which a five-minute monitor misses every single time — so pinging
+ *  health would turn a keep-awake into a permanent external request against DreamDEX's
+ *  API, and couple this service's "is it up" answer to someone else's uptime.
+ *
+ *  This answers "is the process listening", nothing more. It says nothing about whether
+ *  the agent can trade, and it must not: a monitor that alarms when the kill switch is on
+ *  is a monitor nobody keeps. Use `/api/health` for that, on purpose, when you want it. */
+export const pingRouter: Router = Router();
+
+pingRouter.get('/ping', (_req, res) => {
+  res.json({ ok: true, uptimeSec: Math.floor(process.uptime()), ts: Date.now() });
+});
+
 /** Health is the most-polled endpoint (the UI hits it on every render), and it
  *  reaches out to the DreamDEX REST API to report indexer state. Uncached, that
  *  turns a page refresh into an external request and a liveness check into a

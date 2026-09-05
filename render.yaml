@@ -7,6 +7,13 @@ services:
     # trade-off is real and worth knowing: a free service sleeps after ~15 minutes
     # idle, so the first request after a nap takes about 50 seconds to answer while
     # the container wakes. Call it twice; the second is instant.
+    #
+    # The fix is an external uptime monitor (UptimeRobot or similar) hitting GET /ping
+    # every 5 minutes. /ping is deliberately the cheapest route in the service — no
+    # chain read, no RPC, no external API, nothing cached to miss. Do NOT point a
+    # monitor at /api/health for this: health calls fetchSpotMarkets() for indexer
+    # state on a 10s cache, which a 5-minute monitor misses every single time, turning
+    # a keep-awake into a permanent external request against DreamDEX's API.
     plan: free
     # Build and start from the REPO ROOT, not from backend/. This repo is an npm
     # workspace: the lockfile lives at the root, so installing from the root is the

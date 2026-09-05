@@ -63,6 +63,7 @@ Tests run offline — no RPC, no indexer, no keys. They use a temp data dir and 
 
 | Method | Path | What it does |
 |--------|------|--------------|
+| GET | `/ping` | Liveness only — no chain, no RPC, no external call. Also at `/ping` off the root, for an uptime monitor |
 | GET | `/health` | Liveness, network, feed health, loop status, wallet, clock skew, breaker state, proof anchor |
 | GET | `/metrics` | Prometheus text format — every gauge above, sampled over time |
 | GET | `/markets` | DreamDEX spot markets |
@@ -325,7 +326,7 @@ Run `npm run horizon-study` to re-score and promote/demote tiers. The agent pick
 
 ```bash
 npm run typecheck     # tsc --noEmit
-npm test              # 255 unit + regression tests, no network, no keys
+npm test              # 258 unit + regression tests, no network, no keys
 npm run doctor        # read-only connectivity probe (no keys needed)
 npm run faucet        # mint test tUSDC to trade key (testnet)
 npm run claim         # report claimable settled positions

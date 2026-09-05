@@ -3,7 +3,7 @@ import cors from 'cors';
 import { config, log, warn } from './config';
 import { setSigner } from './services/store';
 import { createConfiguredSigner } from './services/proof';
-import { healthRouter } from './routes/health';
+import { healthRouter, pingRouter } from './routes/health';
 import { marketsRouter } from './routes/markets';
 import { agentRouter } from './routes/agent';
 import { proofRouter } from './routes/proof';
@@ -98,6 +98,10 @@ app.get('/', (_req, res) => {
 });
 
 app.use('/api', healthRouter);
+// Liveness at both `<host>/ping` and `<host>/api/ping`, so an uptime monitor's URL is
+// the one somebody would guess. Its own router, so `/health` is not duplicated with it.
+app.use('/', pingRouter);
+app.use('/api', pingRouter);
 app.use('/api', marketsRouter);
 app.use('/api', agentRouter);
 app.use('/api', proofRouter);
