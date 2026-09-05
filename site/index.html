@@ -161,17 +161,6 @@
   .card-txt { display: flex; flex-direction: column; gap: 10px; }
   .card p { font-size: var(--p4); color: var(--muted); line-height: 1.6; }
 
-  /* ── the record: four figures on card surfaces ────────────────────────── */
-  .figs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-  @media (max-width: 900px) { .figs { grid-template-columns: repeat(2, 1fr); } }
-  .fig { background: var(--card); border: var(--edge); border-radius: var(--radius); box-shadow: var(--lift); padding: clamp(20px, 2.2vw, 26px); }
-  /* A rule under the label rather than a gap: brutalism divides with lines, not whitespace. */
-  .fig dt { font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding-bottom: 12px; margin-bottom: 14px; border-bottom: var(--edge); }
-  /* Its own clamp rather than --h2: these are figures, not headings, and one of them is
-     "-3,196.65" — nine tabular-width glyphs, which at heading size overflowed a quarter
-     of the row. */
-  .fig dd { margin: 0; font-size: clamp(19px, 2vw, 24px); font-weight: 600; color: var(--heading); font-variant-numeric: tabular-nums; }
-  .fig .sub { font-size: var(--p4); color: var(--muted); margin-top: 10px; line-height: 1.5; }
   /* Measure, not container width. 78ch of monospace is over 700px — well past the ~70
      characters a line can carry before the eye loses its place returning. */
   .prose { display: flex; flex-direction: column; gap: 18px; margin-top: clamp(32px, 4vw, 44px); }
@@ -247,7 +236,6 @@
   <div class="wrap nav-in">
     <a class="wordmark" href="#top" aria-label="Somnus">S<svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>MNUS</a>
     <div class="nav-links">
-      <a href="#record" class="hide-sm">Record</a>
       <a href="#verify" class="hide-sm">Verify</a>
       <a href="#setup">Set up</a>
       <a href="https://github.com/zachbuilds26/somnus">GitHub</a>
@@ -300,7 +288,7 @@
             </p>
           </div>
         </div>
-        <a class="btn" href="#record">See its record</a>
+        <a class="btn" href="#setup">Point your agent at it</a>
       </div>
       <div class="card">
         <div class="card-top">
@@ -337,57 +325,12 @@
   </div>
 </section>
 
-<section class="band" id="record">
-  <div class="wrap">
-    <div class="band-head">
-      <p class="kicker">The record · snapshot, 5 September 2026</p>
-      <h2>It is not profitable. Here is the number, and here is why.</h2>
-      <p>
-        This page is static, so these are a dated snapshot. The links below go to the running
-        agent, which is the copy to believe if the two ever disagree.
-      </p>
-    </div>
-
-    <dl class="figs">
-      <div class="fig"><dt>Settled trades</dt><dd>76</dd><p class="sub">28 won, 48 lost</p></div>
-      <div class="fig"><dt>Win rate</dt><dd>36.8%</dd><p class="sub">a coin flip is 50%</p></div>
-      <div class="fig"><dt>Realised P&amp;L</dt><dd>-3,196.65</dd><p class="sub">tUSDC, testnet</p></div>
-      <div class="fig"><dt>Signed entries</dt><dd>2,885</dd><p class="sub">hash-linked</p></div>
-    </dl>
-
-    <div class="prose">
-      <p>
-        <strong>Roughly 95% of that loss is four trades.</strong> On 30 August, inside ninety
-        seconds, Somnus placed four orders of about 1,000 tUSDC each against a 1,000 ceiling. They
-        cost 3,999 and returned 990. The other 72 fills risked 449 between them and came out close
-        to flat.
-      </p>
-      <p>
-        Two bugs, both caught by this repository's own instrumentation and both fixed. Exposure was
-        compared against a counter held in memory rather than positions actually on-chain, so four
-        orders fitted inside a ceiling meant for one. And cost basis was recorded against the
-        <em>requested</em> size: the first of those trades asked for 1,976 contracts, filled 990,
-        and was booked at 999.86 — a position that cost about 501, paid out 990, and
-        <strong>won</strong>, written into the ledger as a loss.
-      </p>
-      <p>
-        The per-trade cap is 2 tUSDC now and exposure is read from the chain. The reason those two
-        bugs can be described this precisely is the record the loss is stored in — so the number
-        stays. One that looked better and could not be interrogated would be worth less.
-      </p>
-    </div>
-    <div class="hero-cta row-left">
-      <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/agent/pnl">Raw P&amp;L JSON</a>
-      <a class="btn btn-ghost" href="https://somnus-backend.onrender.com/api/agent/report">Full report</a>
-    </div>
-  </div>
-</section>
 
 <section class="band" id="verify">
   <div class="wrap">
     <div class="band-head">
       <p class="kicker">Verify</p>
-      <h2>Do not trust the numbers above. Check them yourself.</h2>
+      <h2>Do not take its word for anything. Check it yourself.</h2>
       <p>
         Every entry carries the hash of the one before it, and most are signed by the wallet that
         placed the trades. The endpoint takes no key — an audit that needs the operator's secret is
@@ -480,12 +423,6 @@ signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
         <a href="https://discord.com/invite/somnia">Discord</a>
       </div>
     </div>
-    <p class="fine">
-      Nothing here is financial advice and none of it is real money. The per-user wallets are
-      custodial by construction — this server can recompute any token's key, which is acceptable
-      only because these are faucet-funded testnet balances. Do not point it at mainnet, and do not
-      deposit anything you would miss.
-    </p>
   </div>
 </footer>
 
