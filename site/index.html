@@ -111,19 +111,17 @@
   .btn-ghost:hover { background: var(--raised); }
   @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 
-  /* ── hero: full viewport minus the bar, centred, gradient-faded edges ── */
-  .hero { position: relative; min-height: calc(100dvh - 64px); overflow: hidden; display: flex; align-items: center; justify-content: center; }
-  .hero canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
-  .fade { pointer-events: none; position: absolute; left: 0; right: 0; height: 96px; z-index: 10; }
-  .fade-top { top: 0; background: linear-gradient(to bottom, var(--page), transparent); }
-  .fade-bot { bottom: 0; background: linear-gradient(to top, var(--page), transparent); }
-  /* Constrained to the same 1200px measure as every other section, and to a text column
-     narrow enough to read. `ch` units in a monospace font are wide — 60ch was over 700px,
-     which is why the hero copy ran the width of the screen. */
+  /* ── hero: centred, and nothing behind it ─────────────────────────────
+     Backdrop removed. Height came down from a full 100dvh with it: a screen of black
+     around three lines of text reads as a page that failed to load, and the canvas was
+     the only thing that made the emptiness deliberate. 78dvh still clears the fold. */
+  .hero { display: flex; align-items: center; justify-content: center; min-height: min(78dvh, 680px); }
+  /* Constrained to a text column narrow enough to read. `ch` units in a monospace font
+     are wide — 60ch was over 700px, which is why the hero copy ran the whole screen. */
   .hero-in {
-    position: relative; z-index: 20; width: 100%; max-width: 900px;
+    width: 100%; max-width: 900px;
     display: flex; flex-direction: column; align-items: center; text-align: center;
-    gap: 24px; padding: 64px clamp(20px, 4vw, 40px);
+    gap: 24px; padding: clamp(48px, 7vw, 72px) clamp(20px, 4vw, 40px);
   }
   .hero h1 { max-width: 24ch; }
   .hero .sub { font-size: var(--p1); color: var(--body); max-width: 52ch; line-height: 1.6; }
@@ -211,13 +209,17 @@
   .panel > .step:first-of-type { margin-top: 0; }
 
   /* ── footer ───────────────────────────────────────────────────────────── */
-  footer { padding: clamp(48px, 6vw, 64px) 0 clamp(56px, 7vw, 88px); border-top: var(--edge); }
-  .foot { display: flex; flex-wrap: wrap; gap: clamp(28px, 4vw, 48px); justify-content: space-between; }
-  .foot h5 { margin: 0 0 14px; font-size: var(--l5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
-  .foot a { display: block; padding: 3px 0; font-size: var(--p4); color: var(--body); text-decoration: none; }
-  .foot a:hover { color: var(--heading); }
-  .fine { margin-top: clamp(32px, 4vw, 44px); font-size: var(--p4); color: var(--muted); line-height: 1.7; max-width: 72ch; }
-  .foot-blurb { margin-top: 14px; max-width: 30ch; }
+  /* One line, and it stays one line: the wordmark and a single note on the same row,
+     wrapping to two only when a narrow screen forces it. */
+  footer { border-top: var(--edge); }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 12px 24px;
+    align-items: center; justify-content: space-between;
+    min-height: 64px; padding-top: 16px; padding-bottom: 16px;
+    font-size: var(--p4); color: var(--muted);
+  }
+  .foot a { color: var(--body); text-decoration: none; border-bottom: var(--edge); }
+  .foot a:hover { color: var(--heading); border-bottom-color: currentColor; }
 </style>
 </head>
 <body>
@@ -244,9 +246,6 @@
 </nav>
 
 <div class="hero" id="top">
-  <canvas id="bg" aria-hidden="true"></canvas>
-  <div class="fade fade-top"></div>
-  <div class="fade fade-bot"></div>
   <div class="hero-in">
     <p class="kicker">Somnia Shannon testnet · DreamDEX Event Contracts</p>
     <h1>An agent that can prove what it did.</h1>
@@ -394,99 +393,15 @@ signer                        0xC2187C19bcD588E0eb68d68143Af5D410079C69a</pre>
 </section>
 
 <footer>
-  <div class="wrap">
-    <div class="foot">
-      <div>
-        <span class="wordmark">S<svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>MNUS</span>
-        <p class="fine foot-blurb">
-          Built for the Somnia × DreamDEX Event Contracts hackathon. Testnet only.
-        </p>
-      </div>
-      <div>
-        <h5>Live endpoints</h5>
-        <a href="https://somnus-backend.onrender.com/api/health">Health</a>
-        <a href="https://somnus-backend.onrender.com/api/agent/pnl">P&amp;L</a>
-        <a href="https://somnus-backend.onrender.com/api/agent/horizons">Horizon tiers</a>
-        <a href="https://somnus-backend.onrender.com/api/proof">Proof chain</a>
-        <a href="https://somnus-backend.onrender.com/metrics">Metrics</a>
-      </div>
-      <div>
-        <h5>Project</h5>
-        <a href="https://github.com/zachbuilds26/somnus">Source</a>
-        <a href="https://github.com/zachbuilds26/somnus#readme">README</a>
-        <a href="https://github.com/zachbuilds26/somnus/commits/master">Commits</a>
-      </div>
-      <div>
-        <h5>Somnia</h5>
-        <a href="https://testnet.somnia.network/">Shannon testnet</a>
-        <a href="https://cloud.google.com/application/web3/faucet/somnia/shannon">STT faucet</a>
-        <a href="https://discord.com/invite/somnia">Discord</a>
-      </div>
-    </div>
+  <div class="wrap foot">
+    <span class="wordmark">S<svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark"/></svg>MNUS</span>
+    <span>Somnia × DreamDEX Event Contracts hackathon · testnet only · <a href="https://github.com/zachbuilds26/somnus">source</a></span>
   </div>
 </footer>
 
 <script>
-/* This page is STATIC. It reads nothing from the agent and calls no API — every figure is a
-   dated snapshot and the links go to the running service. The only JavaScript here draws
-   the hero backdrop, renders the setup picker, and handles the copy buttons. */
-
-/* ── hero backdrop ──────────────────────────────────────────────────────────
-   The reference site puts a <canvas> behind its hero. This is the same idea in a few
-   lines: a slow drift of points, one connecting line where two are close. Deliberately
-   dim and slow — a backdrop that competes with the headline has failed at its job.
-   Respects prefers-reduced-motion by drawing a single static frame instead.            */
-(() => {
-  const cv = document.getElementById('bg');
-  if (!cv) return;
-  const ctx = cv.getContext('2d');
-  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const CELL = 64;
-  let cells = [], w = 0, h = 0, raf = 0, off = 0;
-
-  const size = () => {
-    const r = Math.min(devicePixelRatio || 1, 2);
-    w = cv.clientWidth; h = cv.clientHeight;
-    cv.width = Math.floor(w * r); cv.height = Math.floor(h * r);
-    ctx.setTransform(r, 0, 0, r, 0, 0);
-    /* Filled-cell count scales with area, so a phone does not draw a laptop's workload. */
-    const cols = Math.ceil(w / CELL), rows = Math.ceil(h / CELL);
-    const n = Math.max(6, Math.min(22, Math.round((cols * rows) / 14)));
-    cells = Array.from({ length: n }, () => ({
-      cx: Math.floor(Math.random() * cols), cy: Math.floor(Math.random() * rows),
-      s: 0.25 + Math.random() * 0.5, p: Math.random() * 6.2832,
-    }));
-  };
-
-  const frame = () => {
-    ctx.clearRect(0, 0, w, h);
-    /* A ruled grid rather than a particle field. Drifting dots are a soft, decorative
-       idiom and read as the opposite of this design; a grid is structure, which is the
-       whole argument of a brutalist page. Lines are near-invisible on purpose — this is
-       a backdrop, and one that competes with the headline has failed. */
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,0.045)';
-    ctx.beginPath();
-    for (let x = (off % CELL) - CELL; x < w + CELL; x += CELL) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-    for (let y = (off % CELL) - CELL; y < h + CELL; y += CELL) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
-    ctx.stroke();
-    /* A few cells filled, fading in and out on their own offset phase, so the grid is
-       alive without anything actually moving. */
-    const t = performance.now() / 1000;
-    for (const c of cells) {
-      const a = 0.06 * (0.5 + 0.5 * Math.sin(t * c.s + c.p));
-      ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
-      ctx.fillRect(c.cx * CELL, c.cy * CELL, CELL, CELL);
-    }
-    off += 0.06;
-    raf = requestAnimationFrame(frame);
-  };
-
-  size();
-  if (still) frame(), cancelAnimationFrame(raf);
-  else frame();
-  addEventListener('resize', () => { cancelAnimationFrame(raf); size(); still ? frame() : frame(); });
-})();
+/* This page is STATIC. It reads nothing from the agent and calls no API. The only
+   JavaScript here renders the setup picker and handles the copy buttons. */
 
 /* ── setup, five agents ─────────────────────────────────────────────────────
    Formats checked against each vendor's own docs rather than assumed, because they differ
