@@ -21,6 +21,7 @@ import { findClaimable, heldPositions, type ClaimableRow } from './settlement';
 import { appendEntry } from './store';
 import { gasCostFromReceipt, pickCollateral } from './wallet';
 import { gasFaucetHelp, gasFaucetLinks, type Faucet } from '../faucets';
+import { checkDailyLimit, effectiveMaxStake, type DailyVerdict } from './user-limits';
 import type { UserIdentity } from '../mcp/identity';
 import type { Report } from '../types';
 
@@ -128,8 +129,12 @@ export interface StakeClamp {
 /** Collateral this trade is allowed to risk. Clamps rather than refuses: a caller
  *  who asks for more than the cap wants to trade, and the honest answer is a
  *  smaller trade plus a sentence saying so. */
-export function clampStake(requested?: number): StakeClamp {
-  const cap = maxUserStake();
+export function clampStake(requested?: number, handleCap?: number): StakeClamp {
+  // `handleCap` is a caller's OWN ceiling, which may only ever be tighter than the
+  // server's — see `effectiveMaxStake`. Passed in rather than looked up here so this
+  // stays a pure function and the storage read happens once per request.
+  const serverCap = maxUserStake();
+  const cap = handleCap === undefined ? serverCap : Math.min(handleCap, serverCap);
   if (requested === undefined || !Number.isFinite(requested) || requested <= 0) {
     return { stake: cap, cap, clamped: false };
   }
@@ -844,6 +849,10 @@ export interface UserTradeResult {
   rate?: RateCheck;
   cap?: number;
   stakeClamped?: boolean;
+  /** This caller's own daily-loss position: what they have committed today, their cap if
+   *  they set one, and what is left. Present whenever a cap is in force, so a caller can
+   *  see the budget rather than only hear about it when it stops them. */
+  daily?: DailyVerdict;
   reason: string;
   /** Where to claim gas, as data — present only when a low gas balance is the reason
    *  nothing was sent. */
@@ -876,7 +885,9 @@ async function executeUserTrade(
     return { ...base, placed: false, reason: `cannot trade: ${availability.reason}` };
   }
 
-  const { stake, cap, clamped } = clampStake(opts.stake);
+  // This caller's own ceiling, if they set one. Tighter than the server's or nothing.
+  const own = effectiveMaxStake(identity.handle);
+  const { stake, cap, clamped } = clampStake(opts.stake, own.cap);
   const minEdge = resolveUserMinEdge(opts.minEdge);
 
   // ── price it ────────────────────────────────────────────────────────────────
@@ -965,6 +976,22 @@ async function executeUserTrade(
         `rate limit: ${rate.used} of ${rate.limit} trades used in the last hour. ` +
         `Try again in about ${Math.ceil((rate.retryAfterSec ?? 60) / 60)} minute(s). This bounds a ` +
         'retry loop, which is the most likely way an automated caller empties its own wallet.',
+    };
+  }
+
+  // The caller's own daily cap, checked against what the audit chain says they have
+  // already committed today. Placed AFTER the rate limit and BEFORE the wallet reads:
+  // it is a decision about their policy, not about their balance, so it should not cost
+  // a chain round trip to reach.
+  const daily = checkDailyLimit(identity.handle, quote.cost);
+  if (!daily.ok) {
+    return {
+      ...base,
+      placed: false,
+      quote,
+      cap,
+      daily,
+      reason: `your own daily limit stopped this: ${daily.reason ?? 'daily limit reached'}`,
     };
   }
 

@@ -108,7 +108,7 @@ There are three ways in, and the difference is whose wallet is at stake.
 claude mcp add --transport http somnus https://somnus-backend.onrender.com/mcp
 ```
 
-Twelve read-only tools. No credential, nothing to spend, nothing to steal — nothing registered here can touch the operator's wallet or change a saved rule. (The six per-user tools below are listed too; calling one without a token answers with how to send one.) Ask it things like:
+Twelve read-only tools. No credential, nothing to spend, nothing to steal — nothing registered here can touch the operator's wallet or change a saved rule. (The seven per-user tools below are listed too; calling one without a token answers with how to send one.) Ask it things like:
 
 - *"is somnus trading right now, and what's blocking it?"*
 - *"which timeframes does it actually trust, and on what evidence?"*
@@ -136,7 +136,9 @@ claude mcp add --transport http somnus https://somnus-backend.onrender.com/mcp \
   --header "x-somnus-token: $(openssl rand -hex 24)"
 ```
 
-Six more tools appear, and they act on a wallet that is **yours**. The server derives it as `HMAC(server secret, your token)` — so the same token always returns the same wallet and **nothing is stored anywhere**. There is no per-user database to back up, migrate, or lose in a deploy. Keep the token like a password: it is the only thing that controls the wallet.
+Seven more tools appear, and they act on a wallet that is **yours**. The server derives it as `HMAC(server secret, your token)` — so the same token always returns the same wallet and the WALLET is stored nowhere: there is no per-user database to back up, migrate, or lose in a deploy. Keep the token like a password, because it is the only thing that controls the wallet.
+
+The one exception is `somnus_my_limits`, and it is worth knowing which way it fails. Risk limits you set for yourself ARE written to the server's disk, keyed by your non-reversible handle — so on a diskless deploy they are lost on redeploy, and lost in the LOOSER direction, back to the server defaults. Every response reports `maxPerTradeSource` as `default` or `custom` so you can tell which you are on.
 
 Then say: *"set up my somnus wallet"*
 
@@ -162,6 +164,7 @@ What bounds a trade placed this way:
 
 - `confirm: true` on the call that spends — a quote is free, a purchase is deliberate
 - a hard per-trade cap (1000 tUSDC by default, a tenth of one faucet drip) and an hourly per-token rate limit, neither of which a tool argument can raise. Ask for more and you are clamped down and told so; ask for nothing and it stakes the cap, so name a number if you want a smaller bet
+- **limits you set yourself**, via `somnus_my_limits`: a tighter per-trade cap, and a daily loss cap the server does not impose at all. Yours can only ever be *tighter* than the server's — asking for more is clamped down and reported, so this hands out no authority you did not already have. The daily cap is a real maximum loss rather than an approximation of one: every position is a bought outcome token, so its cost *is* its worst case. Resets 00:00 UTC.
 - your stake is a **ceiling, not a fixed amount**. Two things shrink it, and every quote says which in plain words (`sizingNote`, next to `stakeRequested` and `stakeUsed`): a window class the model has not yet proven itself on is sized at **half** and demands **double** the edge, and contracts are whole units so the remainder after the last one is left unspent. Ask to risk 10 on an hourly window and expect about 4.85 — deliberately, and now stated rather than inferred from the cost
 - the operator's kill switch: a paused deployment adds no new risk of any kind, including yours
 - the same model, horizon tiers and edge bar the agent applies to its own money (you can demand *more* edge, never less)
@@ -189,7 +192,7 @@ It comes up in dry-run. Nothing reaches the chain until you say so.
 
 | | Read — anyone | Your wallet — hosted, with a token | Operator — local only |
 |---|---|---|---|
-| **State** | `health` `config` `explain` | `my_wallet` | `config_set` `pause` `resume` |
+| **State** | `health` `config` `explain` | `my_wallet` `my_limits` | `config_set` `pause` `resume` |
 | **Market** | `markets` `book` `horizons` | `my_quote` | `scan` `confirm` |
 | **Money** | `pnl` `report` | `my_fund` `my_trade` `my_positions` `my_claim` | `settle` `claim` `setup` |
 | **Trust** | `proof_verify` `pnl_verify` `reconcile` `decisions` | — | `loop_start` `loop_stop` `loop_status` |
@@ -197,6 +200,8 @@ It comes up in dry-run. Nothing reaches the chain until you say so.
 Operator tools go through the same broker and the same circuit breakers as the HTTP API — MCP is another doorway onto the same enforcement, not a way past it.
 
 Per-user tools deliberately do **not** go through the broker: it enforces the operator's mandate and writes cost basis into the ledger the operator's loss breakers read, so feeding somebody else's trades into it would fire the operator's daily-loss limit on a stranger's losses. What they share is everything that bounds a single order — the probability model, the tier policy, the crossing rule, the fill accounting and the on-chain window check.
+
+That separation is also why callers get their own breakers rather than borrowing the agent's. `somnus_my_limits` sets a tighter per-trade cap and a daily loss cap, and the daily figure is computed from the caller's own orders in the signed audit chain rather than from a second per-user ledger — one source of truth, and the one this project asks people to believe. A caller's value may only ever be tighter than the server's, clamped on write *and* on read, so a hand-edited file cannot widen anything.
 
 Per-user tools are registered only when the deployment sets `SOMNUS_USER_SECRET`, and their orders only reach the chain when it also sets `SOMNUS_USER_TRADING=live`. Otherwise every trade is priced, recorded and not sent.
 
@@ -326,7 +331,7 @@ Run `npm run horizon-study` to re-score and promote/demote tiers. The agent pick
 
 ```bash
 npm run typecheck     # tsc --noEmit
-npm test              # 258 unit + regression tests, no network, no keys
+npm test              # 278 unit + regression tests, no network, no keys
 npm run doctor        # read-only connectivity probe (no keys needed)
 npm run faucet        # mint test tUSDC to trade key (testnet)
 npm run claim         # report claimable settled positions

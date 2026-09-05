@@ -15,6 +15,13 @@ import {
 } from '../services/user-trading';
 import { ok, guard, reporter } from './shared';
 import { gasFaucetHelp, gasFaucetLinks } from '../faucets';
+import {
+  checkDailyLimit,
+  clearLimits,
+  effectiveMaxStake,
+  saveLimits,
+  savedLimits,
+} from '../services/user-limits';
 import type { UserIdentity } from './identity';
 
 /** PER-USER tools — the caller's own wallet, on the hosted endpoint.
@@ -67,7 +74,13 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
           readError: snapshot.error,
           tradingMode: availability.mode,
           tradingBlocked: availability.ok ? undefined : availability.reason,
-          maxPerTrade: maxUserStake(),
+          // The cap actually in force for THIS caller, which is their own when they set
+          // one and the server's otherwise. Reporting `maxUserStake()` here would have
+          // told somebody who tightened their limit to 50 that it was still 1000.
+          maxPerTrade: effectiveMaxStake(identity.handle).cap,
+          maxPerTradeSource: effectiveMaxStake(identity.handle).source,
+          maxDailyLoss: savedLimits(identity.handle).maxDailyLoss,
+          committedToday: checkDailyLimit(identity.handle, 0).spent,
           minGasToTransact: minUserGas(),
           minEdgeFloor: userMinEdgeFloor(),
           tradesPerHour: userTradesPerHour(),
@@ -194,6 +207,79 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
   );
 
   server.registerTool(
+    'somnus_my_limits',
+    {
+      description:
+        'Your own risk limits, and how to change them. The server caps every caller at ' +
+        `${maxUserStake()} tUSDC a trade and ${userTradesPerHour()} trades an hour, but sets no ` +
+        'daily loss cap at all — so by default the only thing that stops you losing your whole ' +
+        'balance is running out of it. Set your own here. Called with no arguments it reports ' +
+        'what is in force, what you have committed today, and what is left. Your values can ' +
+        'only ever be TIGHTER than the server\'s; asking for more is clamped down and reported.',
+      inputSchema: {
+        maxPerTrade: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            `Most collateral one of your trades may risk, tUSDC. Clamped to ${maxUserStake()}.`,
+          ),
+        maxDailyLoss: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            'Most collateral you may commit in one UTC day, tUSDC. This is a real maximum ' +
+              'daily LOSS, not an approximation: every position is a bought outcome token, so ' +
+              'its cost is its worst case. Resets at 00:00 UTC.',
+          ),
+        reset: z
+          .boolean()
+          .optional()
+          .describe('true = forget your settings and go back to the server defaults.'),
+      },
+    },
+    (args) =>
+      guard(async () => {
+        const identity = resolve();
+        if (args.reset === true) {
+          clearLimits(identity.handle);
+        } else if (args.maxPerTrade !== undefined || args.maxDailyLoss !== undefined) {
+          saveLimits(identity.handle, {
+            ...(args.maxPerTrade !== undefined ? { maxPerTrade: args.maxPerTrade } : {}),
+            ...(args.maxDailyLoss !== undefined ? { maxDailyLoss: args.maxDailyLoss } : {}),
+          });
+        }
+        const saved = savedLimits(identity.handle);
+        const stake = effectiveMaxStake(identity.handle);
+        const daily = checkDailyLimit(identity.handle, 0);
+        return ok({
+          maxPerTrade: stake.cap,
+          maxPerTradeSource: stake.source,
+          serverMaxPerTrade: stake.serverCap,
+          maxDailyLoss: saved.maxDailyLoss,
+          maxDailyLossSource: saved.maxDailyLoss === undefined ? 'unset' : 'custom',
+          committedToday: daily.spent,
+          remainingToday: daily.remaining,
+          dayUtc: daily.dayUtc,
+          tradesPerHour: userTradesPerHour(),
+          minEdgeFloor: userMinEdgeFloor(),
+          setAt: saved.setAt ? new Date(saved.setAt).toISOString() : undefined,
+          note:
+            saved.maxDailyLoss === undefined
+              ? 'You have no daily loss cap. The server does not impose one — set maxDailyLoss ' +
+                'here if you want your losses bounded by something other than your balance.'
+              : `Your daily cap is ${saved.maxDailyLoss} tUSDC and resets at 00:00 UTC.`,
+          storageWarning:
+            'Saved against your handle on the server\'s disk. This deployment has no persistent ' +
+            'disk, so a redeploy loses these and every caller falls back to the server defaults — ' +
+            'which are LOOSER, not tighter. `maxPerTradeSource` tells you which you are on, so ' +
+            're-check it after a deploy rather than assuming.',
+        });
+      }),
+  );
+
+  server.registerTool(
     'somnus_my_positions',
     {
       description:
@@ -259,6 +345,7 @@ export function userToolNames(): string[] {
     'somnus_my_fund',
     'somnus_my_quote',
     'somnus_my_trade',
+    'somnus_my_limits',
     'somnus_my_positions',
     'somnus_my_claim',
   ];
