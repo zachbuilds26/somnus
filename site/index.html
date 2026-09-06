@@ -172,12 +172,6 @@
   }
   .copy:hover { color: var(--ink); background: var(--hover); }
 
-  /* ── verify strip ── */
-  .verify-grid { display: grid; grid-template-columns: 1fr; gap: 16px; max-width: 900px; margin: 0 auto; }
-  .verify-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
-  .snapshot { font-size: 12px; line-height: 1.7; color: var(--muted); }
-  .snapshot strong { color: var(--ink); }
-
   footer { }
   .foot {
     max-width: 1120px; margin: 0 auto; padding: 24px 20px;
@@ -221,7 +215,6 @@
     <a class="wordmark" href="#top" aria-label="Somnus home">S<svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#mark" /></svg>MNUS</a>
     <nav class="links" aria-label="Main navigation">
       <a href="#setup">Set up</a>
-      <a href="#verify" class="hide-sm">Verify</a>
       <a href="https://github.com/zachbuilds26/somnus">GitHub</a>
     </nav>
     <div class="bar-cta">
@@ -284,36 +277,6 @@
     </div>
   </section>
 
-  <!-- ── VERIFY ── -->
-  <section class="band" id="verify">
-    <div class="wrap">
-      <div class="band-head center">
-        <p class="kicker">Verify</p>
-        <h2>Don’t take its word. Check it.</h2>
-        <p>
-          The audit route takes no key on purpose — a public audit that needs the operator’s
-          secret is not one. Run this from your terminal right now.
-        </p>
-      </div>
-      <div class="verify-grid">
-        <div class="code">
-          <pre>curl -s -X POST https://somnus-backend.onrender.com/api/proof/verify -H 'content-type: application/json' -d '{}'</pre>
-          <button class="copy" type="button">Copy</button>
-        </div>
-        <p class="snapshot">
-          <strong>Snapshot 5 Sep 2026:</strong> linkage over 2,885 entries PASS · head match PASS ·
-          400 of 400 signatures valid · signer <strong>0xC2187C19…79C69a</strong> ·
-          realised P&amp;L <strong>-3,196 tUSDC over 76 trades</strong>, kept on the record.
-          Live endpoints are the copy to believe if this page ever disagrees.
-        </p>
-        <div class="verify-links">
-          <a class="btn btn-sm" href="https://somnus-backend.onrender.com/api/proof">Browse the chain</a>
-          <a class="btn btn-sm" href="https://somnus-backend.onrender.com/api/agent/pnl">Open the P&amp;L</a>
-          <a class="btn btn-sm" href="https://somnus-backend.onrender.com/api/agent/horizons">Open the tier table</a>
-        </div>
-      </div>
-    </div>
-  </section>
 </main>
 
 <footer>
