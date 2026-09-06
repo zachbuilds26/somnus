@@ -149,6 +149,9 @@
   }
   .tab:hover { color: var(--ink); }
   .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  /* No focus box on tabs — keyboard focus shows as the same pink underline. */
+  .tab:focus { outline: none; }
+  .tab:focus-visible { outline: none; color: var(--ink); border-bottom-color: var(--accent); }
   .panel { background: var(--surface); padding: 24px; max-width: 900px; margin: 0 auto; }
   .panel[hidden] { display: none; }
   .panel h3 { font-size: 17px; margin-bottom: 8px; }
