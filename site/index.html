@@ -128,6 +128,7 @@
   }
   .live-badge .dot { width: 6px; height: 6px; background: var(--accent); animation: blink 1.6s steps(1) infinite; }
   .hero h1 { font-size: clamp(30px, 4.6vw, 52px); line-height: 0.95; max-width: 16ch; }
+  .hero h1 .accent { color: var(--accent); }
   .hero .sub { max-width: 62ch; font-size: 16px; line-height: 1.7; color: var(--muted); }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 8px; }
   .faucet-note { max-width: 60ch; font-size: 12px; line-height: 1.6; color: var(--muted); }
@@ -247,7 +248,7 @@
     <div class="hero-fade" aria-hidden="true"></div>
     <div class="hero-in">
       <p class="live-badge"><span class="dot" aria-hidden="true"></span>Live on Somnia Shannon testnet</p>
-      <h1>An autonomous trading agent that can prove what it did.</h1>
+      <h1>An autonomous trading agent that can <span class="accent">prove what it did.</span></h1>
       <p class="sub">
         Somnus reads live DreamDEX Event Contract books, forms its own probability for each
         window, and trades only inside hard limits it cannot talk its way past. Every decision
