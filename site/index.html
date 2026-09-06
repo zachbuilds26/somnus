@@ -100,9 +100,11 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     padding: 12px 20px; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer;
     border: 2px solid var(--line); background: transparent; color: var(--ink);
+    box-shadow: 4px 4px 0 0 var(--ink);
     transition: transform 120ms ease, box-shadow 120ms ease, background-color 160ms ease;
   }
-  .btn:hover { transform: translate(-2px, -2px); box-shadow: 5px 5px 0 0 var(--ink); background: var(--surface); }
+  .btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 0 var(--ink); background: var(--surface); }
+  .btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 0 var(--ink); }
   .btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 0 var(--ink); }
   .btn svg { width: 16px; height: 16px; flex: none; }
   .btn-primary {
