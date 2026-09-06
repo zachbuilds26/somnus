@@ -42,7 +42,7 @@
   a { color: inherit; }
   code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
-  ::selection { background: var(--ink); color: var(--background); }
+  ::selection { background: var(--accent); color: var(--accent-ink); }
   section[id] { scroll-margin-top: 1rem; }
 
   /* Thick frames everywhere — PayPort signature. */
@@ -100,10 +100,10 @@
   .btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 0 var(--ink); }
   .btn svg { width: 16px; height: 16px; flex: none; }
   .btn-primary {
-    background: var(--ink); border-color: var(--background); color: var(--background);
+    background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
     box-shadow: 4px 4px 0 0 var(--ink);
   }
-  .btn-primary:hover { background: var(--ink); border-color: var(--background); box-shadow: 6px 6px 0 0 var(--ink); }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 6px 6px 0 0 var(--ink); }
   .btn-primary:active { transform: translate(2px, 2px); box-shadow: 0 0 0 0 var(--ink); }
   .btn-sm { padding: 10px 14px; font-size: 12px; }
 
@@ -120,17 +120,17 @@
     display: inline-flex; align-items: center; gap: 8px;
     font-size: 10px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted);
   }
-  .live-badge .dot { width: 6px; height: 6px; background: var(--ink); animation: blink 1.6s steps(1) infinite; }
+  .live-badge .dot { width: 6px; height: 6px; background: var(--accent); animation: blink 1.6s steps(1) infinite; }
   .hero h1 { font-size: clamp(30px, 4.6vw, 52px); line-height: 0.95; max-width: 16ch; }
   .hero .sub { max-width: 62ch; font-size: 16px; line-height: 1.7; color: var(--muted); }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 8px; }
   .faucet-note { max-width: 60ch; font-size: 12px; line-height: 1.6; color: var(--muted); }
-  .faucet-note a { color: var(--ink); text-underline-offset: 2px; }
-  .faucet-note a:hover { color: var(--muted); }
+  .faucet-note a { color: var(--accent); text-underline-offset: 2px; }
+  .faucet-note a:hover { color: var(--ink); }
 
   /* ── sections: separated by whitespace, no divider rules ── */
   .wrap { max-width: 1120px; margin: 0 auto; padding: 80px 20px; }
-  .kicker { font-size: 10px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); }
+  .kicker { font-size: 10px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent); }
   .band-head { max-width: 640px; display: flex; flex-direction: column; gap: 16px; margin-bottom: 48px; }
   .band-head h2 { font-size: clamp(23px, 3.4vw, 38px); line-height: 1.02; }
   .band-head p { font-size: 14px; line-height: 1.7; color: var(--muted); }
@@ -146,7 +146,7 @@
     transition: transform 120ms ease, box-shadow 120ms ease, background-color 160ms ease, color 160ms ease;
   }
   .tab:hover { color: var(--ink); }
-  .tab[aria-selected="true"] { background: var(--raised); color: var(--ink); box-shadow: none; transform: translate(4px, 4px); }
+  .tab[aria-selected="true"] { background: var(--raised); color: var(--ink); border-color: var(--accent); box-shadow: none; transform: translate(4px, 4px); }
   .panel { background: var(--surface); padding: 24px; max-width: 900px; margin: 0 auto; }
   .panel[hidden] { display: none; }
   .panel h3 { font-size: 17px; margin-bottom: 8px; }
@@ -184,8 +184,8 @@
     display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;
     font-size: 12px; color: var(--muted);
   }
-  .foot a { color: var(--ink); text-underline-offset: 2px; }
-  .foot a:hover { color: var(--muted); }
+  .foot a { color: var(--accent); text-underline-offset: 2px; }
+  .foot a:hover { color: var(--ink); }
 
   @media (max-width: 640px) {
     .hero-in { padding: 48px 20px 44px; }
