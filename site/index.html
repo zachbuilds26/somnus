@@ -341,7 +341,7 @@ var AGENTS = [
     note: 'One command, no file to edit. Add the header only for the wallet tools.',
     steps: [
       ['Read-only', 'claude mcp add --transport http somnus ' + MCP],
-      ['With your own wallet', 'claude mcp add --transport http somnus ' + MCP + ' \\\n  --header "x-somnus-token: $(openssl rand -hex 24)"'],
+      ['With your own wallet', 'claude mcp add --transport http somnus ' + MCP + ' \\\n  --header "x-somnus-token: <a long random string you keep>"'],
       ['Then just ask', 'is somnus trading right now, and what is blocking it?']
     ]
   },
