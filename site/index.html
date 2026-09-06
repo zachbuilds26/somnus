@@ -42,7 +42,7 @@
   a { color: inherit; }
   code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
-  ::selection { background: var(--accent); color: var(--accent-ink); }
+  ::selection { background: var(--ink); color: var(--background); }
   section[id] { scroll-margin-top: 1rem; }
 
   /* Thick frames everywhere — PayPort signature. */
@@ -100,10 +100,10 @@
   .btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 0 var(--ink); }
   .btn svg { width: 16px; height: 16px; flex: none; }
   .btn-primary {
-    background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+    background: var(--ink); border-color: var(--background); color: var(--background);
     box-shadow: 4px 4px 0 0 var(--ink);
   }
-  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 6px 6px 0 0 var(--ink); }
+  .btn-primary:hover { background: var(--ink); border-color: var(--background); box-shadow: 6px 6px 0 0 var(--ink); }
   .btn-primary:active { transform: translate(2px, 2px); box-shadow: 0 0 0 0 var(--ink); }
   .btn-sm { padding: 10px 14px; font-size: 12px; }
 
@@ -121,7 +121,7 @@
     font-size: 10px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted);
   }
   .live-badge .dot { width: 6px; height: 6px; background: var(--ink); animation: blink 1.6s steps(1) infinite; }
-  .hero h1 { font-size: clamp(34px, 5.4vw, 60px); line-height: 0.95; max-width: 16ch; }
+  .hero h1 { font-size: clamp(30px, 4.6vw, 52px); line-height: 0.95; max-width: 16ch; }
   .hero .sub { max-width: 62ch; font-size: 16px; line-height: 1.7; color: var(--muted); }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 8px; }
   .faucet-note { max-width: 60ch; font-size: 12px; line-height: 1.6; color: var(--muted); }
@@ -132,7 +132,7 @@
   .wrap { max-width: 1120px; margin: 0 auto; padding: 80px 20px; }
   .kicker { font-size: 10px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); }
   .band-head { max-width: 640px; display: flex; flex-direction: column; gap: 16px; margin-bottom: 48px; }
-  .band-head h2 { font-size: clamp(26px, 4vw, 44px); line-height: 1.02; }
+  .band-head h2 { font-size: clamp(23px, 3.4vw, 38px); line-height: 1.02; }
   .band-head p { font-size: 14px; line-height: 1.7; color: var(--muted); }
   .band-head.center { text-align: center; align-items: center; margin-inline: auto; }
   .band-head.center p { max-width: 62ch; }
@@ -236,7 +236,7 @@
     <div class="hero-fade" aria-hidden="true"></div>
     <div class="hero-in">
       <p class="live-badge"><span class="dot" aria-hidden="true"></span>Live on Somnia Shannon testnet</p>
-      <h1>An agent that can prove what it did.</h1>
+      <h1>An autonomous trading agent that can prove what it did.</h1>
       <p class="sub">
         Somnus reads live DreamDEX Event Contract books, forms its own probability for each
         window, and trades only inside hard limits it cannot talk its way past. Every decision
