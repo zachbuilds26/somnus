@@ -89,6 +89,8 @@
   .bar-cta { display: flex; align-items: center; gap: 10px; }
   .bar-link { font-size: 12px; font-weight: 600; color: var(--ink); text-decoration: none; padding: 8px 0; }
   .bar-link:hover { color: var(--accent); }
+  .bar-link:focus { outline: none; }
+  .bar-link:focus-visible { outline: none; color: var(--accent); }
   @media (max-width: 720px) { nav.links .hide-sm { display: none; } }
 
   /* ── buttons: square, framed, they physically press ── */
@@ -152,7 +154,7 @@
   /* No focus box on tabs — keyboard focus shows as the same pink underline. */
   .tab:focus { outline: none; }
   .tab:focus-visible { outline: none; color: var(--ink); border-bottom-color: var(--accent); }
-  .panel { background: var(--surface); padding: 24px; max-width: 900px; margin: 0 auto; }
+  .panel { padding: 8px 0 24px; max-width: 900px; margin: 0 auto; }
   .panel[hidden] { display: none; }
   .panel h3 { font-size: 17px; margin-bottom: 8px; }
   .panel .note { font-size: 14px; line-height: 1.65; color: var(--muted); margin-bottom: 20px; max-width: 68ch; }
@@ -164,15 +166,15 @@
   /* ── code blocks ── */
   .code { position: relative; }
   pre {
-    margin: 0; padding: 18px 84px 18px 18px; overflow-x: auto;
-    background: var(--raised); border: 2px solid var(--line);
+    margin: 0; padding: 16px 84px 16px 16px; overflow-x: auto;
+    background: var(--surface); border: 1px solid rgba(255,255,255,0.18);
     font-size: 13px; line-height: 1.7; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
   }
   pre.plain { padding-right: 18px; }
   .copy {
     position: absolute; top: 12px; right: 12px; padding: 7px 12px;
     font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
-    background: var(--surface); color: var(--muted); border: 2px solid var(--line);
+    background: transparent; color: var(--muted); border: 1px solid rgba(255,255,255,0.25);
     transition: transform 120ms ease, color 160ms ease, background-color 160ms ease;
   }
   .copy:hover { color: var(--ink); background: var(--hover); }
@@ -386,7 +388,7 @@ AGENTS.forEach(function (a, i) {
   tabsEl.appendChild(tab);
 
   var panel = document.createElement('div');
-  panel.className = 'panel frame slab';
+  panel.className = 'panel';
   panel.id = 'panel-' + a.id;
   panel.setAttribute('role', 'tabpanel');
   panel.setAttribute('aria-labelledby', 'tab-' + a.id);
