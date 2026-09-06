@@ -85,7 +85,9 @@
   .wordmark .mark { width: 0.95em; height: 0.95em; margin: 0 0.04em; }
   nav.links { display: flex; align-items: center; gap: 22px; font-size: 12px; font-weight: 500; color: var(--muted); }
   nav.links a { text-decoration: none; padding: 8px 0; }
-  nav.links a:hover { color: var(--ink); }
+  nav.links a:hover { color: var(--accent); }
+  nav.links a:focus { outline: none; }
+  nav.links a:focus-visible { outline: none; color: var(--accent); }
   .bar-cta { display: flex; align-items: center; gap: 10px; }
   .bar-link { font-size: 12px; font-weight: 600; color: var(--ink); text-decoration: none; padding: 8px 0; }
   .bar-link:hover { color: var(--accent); }
