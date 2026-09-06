@@ -79,7 +79,6 @@
   header.bar {
     position: sticky; top: 0; z-index: 30;
     background: rgba(0,0,0,0.92); backdrop-filter: blur(8px);
-    border-bottom: 2px solid var(--line);
   }
   .bar-in { max-width: 1120px; margin: 0 auto; padding: 0 20px; height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .wordmark { display: inline-flex; align-items: center; gap: 1px; font-family: "Unbounded", Arial, sans-serif; font-weight: 600; font-size: 15px; letter-spacing: -0.03em; text-decoration: none; }
@@ -129,8 +128,7 @@
   .faucet-note a { color: var(--ink); text-underline-offset: 2px; }
   .faucet-note a:hover { color: var(--muted); }
 
-  /* ── sections ── */
-  section.band { border-top: 2px solid var(--line); }
+  /* ── sections: separated by whitespace, no divider rules ── */
   .wrap { max-width: 1120px; margin: 0 auto; padding: 80px 20px; }
   .kicker { font-size: 10px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); }
   .band-head { max-width: 640px; display: flex; flex-direction: column; gap: 16px; margin-bottom: 48px; }
@@ -194,7 +192,7 @@
   .snapshot { font-size: 12px; line-height: 1.7; color: var(--muted); }
   .snapshot strong { color: var(--ink); }
 
-  footer { border-top: 2px solid var(--line); }
+  footer { }
   .foot {
     max-width: 1120px; margin: 0 auto; padding: 24px 20px;
     display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;
