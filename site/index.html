@@ -172,6 +172,12 @@
   }
   .copy:hover { color: var(--ink); background: var(--hover); }
 
+  /* ── demo video ── */
+  .video-wrap { max-width: 960px; }
+  .video-frame { background: var(--surface); }
+  .video-frame iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; }
+  .video-note { margin-top: 14px; text-align: center; font-size: 12px; line-height: 1.6; color: var(--muted); }
+
   footer { }
   .foot {
     max-width: 1120px; margin: 0 auto; padding: 24px 20px;
@@ -251,6 +257,16 @@
         <a href="https://stakely.io/faucet/somnia-testnet-stt">Stakely</a>.
         If the first request is slow, the host is waking — call it twice.
       </p>
+    </div>
+  </section>
+
+  <!-- ── DEMO VIDEO: placeholder embed — swap the src with the real demo before submission ── -->
+  <section class="band" id="demo">
+    <div class="wrap video-wrap">
+      <div class="video-frame frame slab">
+        <iframe src="https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ" title="Somnus demo video (placeholder)" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+      <p class="video-note">Placeholder cut — the final demo video replaces this embed before submission.</p>
     </div>
   </section>
 
