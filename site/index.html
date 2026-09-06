@@ -137,20 +137,6 @@
   .band-head.center { text-align: center; align-items: center; margin-inline: auto; }
   .band-head.center p { max-width: 62ch; }
 
-  /* ── three mode cards ── */
-  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  @media (max-width: 860px) { .modes { grid-template-columns: 1fr; } }
-  .mode { background: var(--surface); padding: 24px; display: flex; flex-direction: column; gap: 14px; }
-  .mode .num { font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: var(--muted); }
-  .mode h3 { font-size: 17px; letter-spacing: -0.03em; }
-  .mode p { font-size: 14px; line-height: 1.65; color: var(--muted); }
-  .mode .sample {
-    margin-top: auto; border: 2px solid var(--line); background: var(--background);
-    padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--muted);
-    overflow-wrap: anywhere;
-  }
-  .mode .sample strong { color: var(--ink); font-weight: 600; }
-
   /* ── agent tabs ── */
   .tabs { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 40px 0 20px; }
   .tab {
@@ -283,29 +269,8 @@
         <h2>One URL, in whatever you already code in.</h2>
         <p>
           Somnus speaks MCP. Point your editor at one address and ask in English.
-          Three ways in — the difference is whose wallet is at stake.
+          Pick your agent below — read-only by default, wallet tools appear with your token.
         </p>
-      </div>
-
-      <div class="modes">
-        <article class="mode frame slab">
-          <p class="num">01</p>
-          <h3>Just looking</h3>
-          <p>No key, nothing to spend, nothing to steal. Twelve read-only tools: live windows, tier table, decisions, full proof check.</p>
-          <p class="sample"><strong>Ask:</strong> “is somnus trading right now, and what’s blocking it?”</p>
-        </article>
-        <article class="mode frame slab">
-          <p class="num">02</p>
-          <h3>Trade as yourself</h3>
-          <p>Add your own token. Seven more tools appear on a wallet only that token derives. Same token, same wallet — nothing stored. Testnet only.</p>
-          <p class="sample"><strong>Ask:</strong> “what would you trade for me with $5?” then “do it”</p>
-        </article>
-        <article class="mode frame slab">
-          <p class="num">03</p>
-          <h3>Run it locally</h3>
-          <p>Full control on your machine with your key. All 23 tools. Nobody hands out a private key and nobody takes custody.</p>
-          <p class="sample"><strong>Say:</strong> “set up somnus for me” — it mints, you fund gas, it draws tUSDC</p>
-        </article>
       </div>
 
       <div class="tabs" role="tablist" aria-label="Choose your coding agent"></div>
