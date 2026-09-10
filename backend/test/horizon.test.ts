@@ -3,6 +3,7 @@ import { writeFileSync, rmSync } from 'node:fs';
 import { afterEach, test } from 'node:test';
 import {
   CALIBRATION_PATH,
+  expiryHeadroomSec,
   governingRegime,
   horizonLabel,
   horizonPolicy,
@@ -162,4 +163,29 @@ test('survives a corrupt calibration file instead of refusing to trade', () => {
   resetCalibrationCache();
   const p = horizonPolicy(900, 890);
   assert.equal(p.tier, 'validated', 'must fall back, not throw or block everything');
+});
+
+// Headroom scales to the window (dreamdex-bot-kit edge #8): a fixed bar wastes
+// the final quarter of short classes while meaning nothing on long ones.
+test('scales expiry headroom to the window class', () => {
+  // Long classes keep today's bar exactly.
+  assert.equal(expiryHeadroomSec(900), MIN_EXPIRY_HEADROOM_SEC);
+  assert.equal(expiryHeadroomSec(14400), MIN_EXPIRY_HEADROOM_SEC);
+  // A 5m window needs 45s, not 75s.
+  assert.equal(expiryHeadroomSec(300), 45);
+  // ...but never less than a chain round trip, whatever the fraction says.
+  assert.equal(expiryHeadroomSec(60), 30);
+  // Garbage in keeps the ceiling rather than opening the gate.
+  assert.equal(expiryHeadroomSec(0), MIN_EXPIRY_HEADROOM_SEC);
+  assert.equal(expiryHeadroomSec(Number.NaN), MIN_EXPIRY_HEADROOM_SEC);
+});
+
+test('applies the scaled headroom in the policy', () => {
+  // 44s left on a 5m window fails the 45s bar, and says so.
+  const q = horizonPolicy(300, 44);
+  assert.equal(q.tier, 'blocked');
+  assert.match(q.note, /45s headroom/);
+  // 200s left clears headroom; the regime gate then decides (provisional here).
+  const p = horizonPolicy(300, 200);
+  assert.equal(p.tier, 'provisional');
 });

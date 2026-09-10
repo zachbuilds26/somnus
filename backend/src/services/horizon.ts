@@ -57,8 +57,29 @@ export interface TradeablePolicy extends Omit<HorizonPolicy, 'tier'> {
 
 /** Minimum seconds a window must have left to be worth trading. A cycle takes
  *  tens of seconds, so a window with seconds left locks between the book read and
- *  the order, the pool reverts `TradingNotActive`, and the gas is wasted. */
+ *  the order, the pool reverts `TradingNotActive`, and the gas is wasted.
+ *
+ *  This is the CEILING, not the rule: `expiryHeadroomSec` scales it down for
+ *  short windows (below), because a fixed bar wastes the final quarter of a
+ *  5-minute window while meaning nothing on a 4-hour one. */
 export const MIN_EXPIRY_HEADROOM_SEC = Number(process.env.AGENT_MIN_EXPIRY_SEC ?? 75);
+
+/** Headroom as a fraction of the window class, with an absolute floor.
+ *
+ *  A window minutes from close can still lock between snapshot and send, but a
+ *  fixed threshold breaks the other way: applied flat it rejects the whole
+ *  tradable tail of short classes. Scale to the interval instead — 15% of a 5m
+ *  window is 45s — while never going below the floor (a chain round trip takes
+ *  what it takes) and never above the ceiling (long windows keep today's bar). */
+const HEADROOM_FRACTION = Number(process.env.AGENT_EXPIRY_HEADROOM_FRACTION ?? 0.15);
+const HEADROOM_FLOOR_SEC = Number(process.env.AGENT_EXPIRY_HEADROOM_FLOOR ?? 30);
+
+/** Seconds of expiry headroom a window of this class must have left. Exported
+ *  for tests. */
+export function expiryHeadroomSec(classSec: number): number {
+  if (!Number.isFinite(classSec) || classSec <= 0) return MIN_EXPIRY_HEADROOM_SEC;
+  return Math.min(MIN_EXPIRY_HEADROOM_SEC, Math.max(HEADROOM_FLOOR_SEC, classSec * HEADROOM_FRACTION));
+}
 
 /** Hard ceiling on window class. Defaults to 24h so every class DreamDEX lists is
  *  reachable; tiering — not this number — is what keeps the unmeasured ones cheap.
@@ -312,8 +333,9 @@ export function horizonPolicy(intervalSec: number | undefined, secondsLeft: numb
   });
 
   if (!Number.isFinite(secondsLeft)) return blocked('no expiry on this window');
-  if (secondsLeft < MIN_EXPIRY_HEADROOM_SEC) {
-    return blocked(`only ${Math.max(0, Math.round(secondsLeft))}s left (< ${MIN_EXPIRY_HEADROOM_SEC}s headroom)`);
+  const headroom = expiryHeadroomSec(classSec);
+  if (secondsLeft < headroom) {
+    return blocked(`only ${Math.max(0, Math.round(secondsLeft))}s left (< ${Math.round(headroom)}s headroom for ${label} windows)`);
   }
   if (classSec <= 0) return blocked('window class unknown');
   if (classSec > MAX_HORIZON_SEC) {
