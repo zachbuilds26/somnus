@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
+import { DATA_DIR } from '../config';
 import {
   computeHash,
   count,
@@ -80,10 +83,23 @@ const MAX_VERIFY_ENTRIES = 5_000;
 const MAX_SIGNATURE_CHECKS = Number(process.env.SOMNUS_MAX_SIGNATURE_CHECKS ?? 400);
 
 /** Full-chain verification is deterministic for a given head, so it is worth computing
- *  once. Keyed on the anchor AND the entry count: the anchor alone would be enough in
- *  practice, but two keys make a stale hit impossible rather than merely unlikely, and
- *  the cost of being wrong here is reporting a verification that never happened. */
-let verifyCache: { anchor: string; entries: number; body: Record<string, unknown> } | undefined;
+ *  once. Keyed on the anchor, the entry count AND the chain file's stat: the anchor
+ *  alone would be enough in practice, but an in-memory anchor that has drifted out
+ *  of step with the file (a repair, a restore, a second process) must never serve
+ *  a verification that was computed against different bytes. Follows the same
+ *  mtimeMs+size diskCache pattern store.ts uses. */
+let verifyCache:
+  | { anchor: string; entries: number; mtimeMs: number; size: number; body: Record<string, unknown> }
+  | undefined;
+
+function chainFileStat(): { mtimeMs: number; size: number } {
+  try {
+    const s = statSync(join(DATA_DIR, 'proof-chain.jsonl'));
+    return { mtimeMs: s.mtimeMs, size: s.size };
+  } catch {
+    return { mtimeMs: -1, size: -1 };
+  }
+}
 
 proofRouter.post('/proof/verify', async (req, res) => {
   try {
@@ -111,7 +127,13 @@ proofRouter.post('/proof/verify', async (req, res) => {
     // default request: a caller-supplied slice is a different question every time.
     if (!isSlice && verifyCache) {
       const anchorNow = currentAnchor();
-      if (verifyCache.anchor === anchorNow && verifyCache.entries === count()) {
+      const statNow = chainFileStat();
+      if (
+        verifyCache.anchor === anchorNow &&
+        verifyCache.entries === count() &&
+        verifyCache.mtimeMs === statNow.mtimeMs &&
+        verifyCache.size === statNow.size
+      ) {
         res.json({ ...verifyCache.body, cached: true });
         return;
       }
@@ -171,7 +193,9 @@ proofRouter.post('/proof/verify', async (req, res) => {
       // `ok` deliberately does NOT claim more than was done. Linkage covered everything;
       // signatures covered a bounded window, and `signaturesSkipped` says how much was
       // left. Reporting ok:true while silently skipping 2,400 recoveries would be the
-      // same class of lie this whole route exists to prevent.
+      // same class of lie this whole route exists to prevent. (`ok` semantics are
+      // unchanged public behavior; `signaturesComplete` below is the additive answer
+      // to "were ALL signatures checked in this request".)
       ok: result.ok && headMatches !== false && signaturesOk,
       linkageOk: result.ok,
       headMatches,
@@ -179,6 +203,10 @@ proofRouter.post('/proof/verify', async (req, res) => {
       signaturesChecked,
       signaturesValid,
       signaturesOk,
+      // True only when no signature was skipped in this request. Lets a caller
+      // distinguish "fully verified" from "verified as far as the per-request
+      // budget reached" without re-reading the coverage note.
+      signaturesComplete: signaturesSkipped === 0,
       ...(signaturesSkipped > 0
         ? {
             signaturesSkipped,
@@ -211,7 +239,10 @@ proofRouter.post('/proof/verify', async (req, res) => {
       total: count(),
     };
     // Cache only the default question, and only once it is fully answered.
-    if (!isSlice) verifyCache = { anchor: reported, entries: count(), body: payload };
+    if (!isSlice) {
+      const stat = chainFileStat();
+      verifyCache = { anchor: reported, entries: count(), mtimeMs: stat.mtimeMs, size: stat.size, body: payload };
+    }
     res.json(payload);
   } catch (err) {
     res.status(500).json({ ok: false, error: (err as Error).message ?? String(err) });

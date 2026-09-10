@@ -42,7 +42,11 @@ export interface ClockState {
   error?: string;
 }
 
-let last: ClockState = { localTs: Date.now(), ok: true, blocking: false };
+// Unknown until the first successful measurement — NOT healthy. The old initial
+// state reported ok:true before anything had ever been measured, so every gate
+// reading the clock between boot and the first check saw a healthy clock that
+// was actually an unmeasured one.
+let last: ClockState = { localTs: Date.now(), ok: false, blocking: false, error: 'not yet measured' };
 
 async function latestBlockTimestamp(): Promise<number | undefined> {
   // Short deadline on purpose: this runs in the boot preflight, which gates
@@ -103,4 +107,16 @@ export async function checkClockSkew(force = false): Promise<ClockState> {
 
 export function clockState(): ClockState {
   return last;
+}
+
+/** True once at least one skew measurement has SUCCEEDED.
+ *
+ *  A failed check still stamps `checkedAt` (so the TTL backs off), which is why
+ *  this also requires no error: an RPC failure is not a measurement. The
+ *  autonomous loop must not autostart on an unmeasured clock: `maybeAutostart`
+ *  in loop.ts (another builder's file) should await one `checkClockSkew(true)`
+ *  and only call `startLoop()` when this returns true — otherwise the first
+ *  cycles price expiries against a clock nobody verified. */
+export function clockMeasured(): boolean {
+  return last.checkedAt !== undefined && last.error === undefined;
 }

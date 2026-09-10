@@ -1,4 +1,5 @@
 import { debug, warn } from '../config';
+import { effectiveDryRun } from '../agent-config';
 import { getSignerAddress, getTradingExchange, nativeGasBalance } from './sdk';
 import { gasFaucetHelp } from '../faucets';
 
@@ -71,8 +72,9 @@ let cache: WalletSnapshot | undefined;
  *  seconds and nothing decremented it, so with $10 of collateral three $8 orders in
  *  one cycle each compared 8 against a stale 10 and all three passed. The chain
  *  refuses the second and third, but the whole point of the check was to not find out
- *  that way. Reset on every fresh read, because a fresh read already reflects
- *  whatever was spent. */
+ *  that way. Reconciled (not zeroed) on every fresh read — see `walletSnapshot` —
+ *  because a fresh read already reflects whatever landed on-chain, while a forced
+ *  mid-cycle re-read must not forgive what is still in flight. */
 let committedSinceRead = 0;
 
 /** Native-currency symbols, so a collateral scan never mistakes gas for collateral. */
@@ -128,6 +130,9 @@ export function pickCollateral(
 
 export async function walletSnapshot(force = false): Promise<WalletSnapshot> {
   if (!force && cache && Date.now() - cache.ts < TTL_MS) return cache;
+  // Previous baseline for the commitment reconciliation at the end: a fresh
+  // balance already reflects the spends that landed on-chain.
+  const prev = cache;
 
   const snapshot: WalletSnapshot = { ts: Date.now() };
 
@@ -172,7 +177,22 @@ export async function walletSnapshot(force = false): Promise<WalletSnapshot> {
   }
 
   cache = snapshot;
-  committedSinceRead = 0;
+  // Do NOT zero `committedSinceRead` here. A fresh balance already reflects the
+  // spends that landed on-chain, so reconcile instead of resetting: reduce the
+  // carried commitment by the observed balance drop (those spends landed), and
+  // keep the rest (still in flight). Blind zeroing on a forced mid-cycle re-read
+  // let the next affordability check spend the same collateral twice; blind
+  // carrying would double-count spends the chain already absorbed. When either
+  // side is unknown there is no baseline to reconcile against — keep the carried
+  // value (the conservative direction) on an unreadable re-read, and start from
+  // zero only when there was genuinely nothing carried against.
+  const prevCollateral = prev?.collateral;
+  if (snapshot.collateral !== undefined && prevCollateral !== undefined) {
+    const landed = Math.max(0, prevCollateral - snapshot.collateral);
+    committedSinceRead = Math.max(0, committedSinceRead - landed);
+  } else if (snapshot.collateral !== undefined && prev === undefined) {
+    committedSinceRead = 0;
+  }
   return snapshot;
 }
 
@@ -201,9 +221,10 @@ export interface AffordabilityCheck {
 
 /** Can this wallet pay for `cost` collateral plus gas right now?
  *
- *  Fails OPEN on an unreadable balance. An RPC blip must not halt an otherwise
- *  healthy agent; the on-chain revert is the backstop, and `maxExecutionFailures`
- *  still bounds how many times we pay to rediscover the problem. Fails CLOSED on a
+ *  Fails OPEN on an unreadable balance in dry-run/view: an RPC blip must not halt
+ *  an otherwise healthy rehearsal, and nothing real is at stake. Fails CLOSED on
+ *  an unreadable balance in LIVE mode: guessing "funded" there spends real gas on
+ *  a certainly-reverting order, while refusing costs a retry. Fails CLOSED on a
  *  balance we could read and that is genuinely too small — that is not a guess. */
 export async function canAfford(cost: number): Promise<AffordabilityCheck> {
   const w = await walletSnapshot();
@@ -239,6 +260,21 @@ export async function canAfford(cost: number): Promise<AffordabilityCheck> {
       };
     }
     return { ok: true, collateral: w.collateral, available };
+  }
+  // Collateral is undefined: the balance could not be read (no key, RPC failure,
+  // or every currency read zero). In live mode that is a refusal with a clear
+  // reason — never a guess, and this records no failure count itself (whatever
+  // the caller does with the refusal is its own policy). Outside live mode the
+  // historic fail-open stands: rehearsals must not halt on an RPC hiccup.
+  if (!effectiveDryRun()) {
+    return {
+      ok: false,
+      reason:
+        'collateral balance could not be confirmed, so the order was not sent — buying on a ' +
+        `guess costs gas for a revert. ${w.error ?? 'no further detail'}`.trim() +
+        ' Run npm run faucet or check the RPC, then retry; nothing was spent.',
+      collateral: w.collateral,
+    };
   }
   return { ok: true, collateral: w.collateral };
 }

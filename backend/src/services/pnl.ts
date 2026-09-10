@@ -1,7 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { DATA_DIR } from '../config';
+import { DATA_DIR, warn } from '../config';
 import { readAllFromDisk } from './store';
+import { raiseAlert } from './alerts';
 import type { FillStrategyMeta } from '../types';
 
 /** Running P&L ledger — the one thing the agent was missing for a judge to see
@@ -60,12 +61,55 @@ function keyOf(marketId: string, outcomeIdx: 0 | 1): string {
   return `${marketId}:${outcomeIdx}`;
 }
 
+/** Has a ledger write ever failed, and why.
+ *
+ *  Mirrors `chainWriteFailure` in store.ts: a silent `catch` here meant a full or
+ *  read-only disk produced an agent whose fills lived only in the dying process —
+ *  `/health` went on reporting P&L from memory while the ledger lost every row on
+ *  restart. Fill rows are NOT re-sweepable (unlike settlement rows, which the next
+ *  sweep re-derives from chain state), so a lost fill write is a permanent hole in
+ *  every loss breaker. That is why a failed FILL append also raises an alert while
+ *  a failed settlement append only records the failure. */
+let writeFailure: { at: number; error: string; count: number } | undefined;
+
+/** Non-null when the durable ledger write has failed. Surfaced on /health next to
+ *  `proofChainWriteFailure`, so a lost P&L trail is visible without reading logs. */
+export function ledgerWriteFailure(): { at: number; error: string; count: number } | undefined {
+  return writeFailure;
+}
+
 function append(row: Row): void {
   try {
     mkdirSync(DATA_DIR, { recursive: true });
     appendFileSync(LEDGER, `${JSON.stringify(row)}\n`, 'utf8');
-  } catch {
-    // storage failure must not take down the agent loop
+    if (writeFailure) {
+      warn(`pnl ledger writes recovered after ${writeFailure.count} failure(s)`);
+      writeFailure = undefined;
+    }
+  } catch (err) {
+    const error = (err as Error).message ?? String(err);
+    // Warn on the first failure only — this sits on the fill path and a read-only
+    // disk would otherwise emit one line per trade forever.
+    if (!writeFailure) {
+      warn(
+        `PNL LEDGER WRITE FAILED (${error}) — rows are being kept in memory only and will be ` +
+          `LOST on restart. Check disk space and permissions on ${DATA_DIR}.`,
+      );
+      writeFailure = { at: Date.now(), error, count: 1 };
+    } else {
+      writeFailure = { at: Date.now(), error, count: writeFailure.count + 1 };
+    }
+    // A lost FILL row never comes back: the settlement sweep re-derives outcomes
+    // from chain state, but cost basis exists only in this write. Say so loudly,
+    // under its own dedupe key so it cannot be swallowed by sweep-failure dedupe.
+    if (row.t === 'fill') {
+      raiseAlert({
+        level: 'critical',
+        key: 'pnl-ledger-fill-write-failed',
+        title: 'P&L ledger write failed — a fill’s cost basis exists only in memory',
+        detail: { error, marketId: row.marketId, outcomeIdx: row.outcomeIdx, cost: row.cost },
+      });
+    }
   } finally {
     // Whether or not the write landed, the cache can no longer be trusted.
     rowCache = undefined;
@@ -219,6 +263,10 @@ export function pnlSummary(): PnlSummary {
       costByKey.set(k, (costByKey.get(k) ?? 0) + r.cost);
     } else {
       const k = keyOf(r.marketId, r.outcomeIdx);
+      // `recordSettlement` is idempotent, but the ledger is plain JSONL — a second
+      // process, a hand edit, or a retried append can still duplicate a settle row.
+      // Without this guard one duplicated line double-counts the payout and the win.
+      if (settleKeys.has(k)) continue;
       settleKeys.add(k);
       if (r.won) {
         settledPayout += r.payout;
@@ -479,8 +527,24 @@ export interface LedgerVerification {
   uncorroborated: Array<{ marketId: string; outcomeIdx: 0 | 1; cost: number; ts: number }>;
   /** Signed live orders that filled but have no ledger row — the lost-write case,
    *  from the ledger's side rather than the chain's. Only counts orders placed
-   *  AFTER the ledger existed. */
+   *  AFTER the ledger existed. Orders with no recorded quantity (filledSize
+   *  undefined/0 and not closed) are excluded: a submitted order that never
+   *  reported a fill has no cost basis to lose, so counting it manufactures a
+   *  permanent false alarm about drift that does not exist. */
   missingFromLedger: Array<{ marketId: string; outcomeIdx: 0 | 1; size?: number; price: number; ts: number }>;
+  /** Ledger fills whose recorded cost disagrees with the signed order's
+   *  price x filledSize beyond tolerance. ADDITIVE reporting only — this never
+   *  fails the verdict, because price rounding (tick-grid snapping, partial IOC
+   *  fills at mixed prices) can legitimately move a fill off its quote. A large
+   *  or growing bucket means the ledger's cost basis — the number every loss
+   *  breaker reads — is drifting from what the venue actually charged. */
+  costMismatches: Array<{
+    marketId: string;
+    outcomeIdx: 0 | 1;
+    ledgerCost: number;
+    chainCost: number;
+    diff: number;
+  }>;
   /** Signed live orders that predate the first ledger row. Informational: cost-basis
    *  recording shipped mid-flight, so these were never going to have one. Excluded
    *  from `ok` because an alarm that can never be cleared is an alarm that gets
@@ -560,10 +624,12 @@ export function verifyLedgerAgainstChain(): LedgerVerification {
 
   const uncorroborated: LedgerVerification['uncorroborated'] = [];
   const seen = new Set<string>();
+  const ledgerCostByKey = new Map<string, number>();
   let corroborated = 0;
   for (const f of fills) {
     const key = keyOf(f.marketId, f.outcomeIdx);
     seen.add(key);
+    ledgerCostByKey.set(key, (ledgerCostByKey.get(key) ?? 0) + f.cost);
     if (chainOrders.has(key)) corroborated++;
     else uncorroborated.push({ marketId: f.marketId, outcomeIdx: f.outcomeIdx, cost: f.cost, ts: f.ts });
   }
@@ -571,8 +637,38 @@ export function verifyLedgerAgainstChain(): LedgerVerification {
   const missingFromLedger: LedgerVerification['missingFromLedger'] = [];
   for (const [key, o] of chainOrders) {
     if (seen.has(key)) continue;
+    // Correctly unrecorded: a submitted order with no known quantity never
+    // produced a cost basis, so there is no ledger row to lose. `filledSize`
+    // undefined/0 on an order that never reported a fill is the submit-without-
+    // fill case, not the lost-write case.
+    if (o.size === undefined || !(o.size > 0)) continue;
     const marketId = key.slice(0, key.lastIndexOf(':'));
     missingFromLedger.push({ marketId, outcomeIdx: o.outcomeIdx, size: o.size, price: o.price, ts: o.ts });
+  }
+
+  // Additive only: compare each corroborated position's ledger cost against the
+  // signed order's price x filledSize. Tolerance is the greater of 5c absolute
+  // (tick-grid snapping on a 1-contract fill) and 1% relative (mixed-price
+  // partial IOC fills) — anything inside either is microstructure, not drift.
+  const costMismatches: LedgerVerification['costMismatches'] = [];
+  for (const [key, o] of chainOrders) {
+    if (!seen.has(key)) continue;
+    if (o.size === undefined || !(o.size > 0) || !Number.isFinite(o.price)) continue;
+    const chainCost = o.price * o.size;
+    if (!Number.isFinite(chainCost)) continue;
+    const ledgerCost = ledgerCostByKey.get(key) ?? 0;
+    const diff = Math.abs(ledgerCost - chainCost);
+    const tolerance = Math.max(0.05, Math.abs(chainCost) * 0.01);
+    if (diff > tolerance) {
+      const marketId = key.slice(0, key.lastIndexOf(':'));
+      costMismatches.push({
+        marketId,
+        outcomeIdx: o.outcomeIdx,
+        ledgerCost: Math.round(ledgerCost * 100) / 100,
+        chainCost: Math.round(chainCost * 100) / 100,
+        diff: Math.round(diff * 100) / 100,
+      });
+    }
   }
 
   const ok = uncorroborated.length === 0 && missingFromLedger.length === 0;
@@ -590,11 +686,15 @@ export function verifyLedgerAgainstChain(): LedgerVerification {
     corroborated,
     uncorroborated,
     missingFromLedger,
+    costMismatches,
     preLedgerOrders,
     userOrders,
     ledgerStartTs,
     note: ok
-      ? `all ${fills.length} ledger fill(s) are backed by a signed order entry${preNote}${userNote}`
+      ? `all ${fills.length} ledger fill(s) are backed by a signed order entry${preNote}${userNote}` +
+        (costMismatches.length > 0
+          ? `; ${costMismatches.length} cost basis mismatch(es) vs signed price x size (advisory only)`
+          : '')
       : [
           uncorroborated.length > 0
             ? `${uncorroborated.length} ledger fill(s) have NO signed order behind them ` +

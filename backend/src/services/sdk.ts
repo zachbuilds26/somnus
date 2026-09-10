@@ -178,7 +178,11 @@ export async function nativeGasBalance(address?: string): Promise<bigint | undef
       [addr, 'latest'],
       BALANCE_RPC_TIMEOUT_MS,
     );
-    return BigInt(result ?? '0x0');
+    // A null result is "the node answered nothing", not "the wallet holds zero".
+    // Coercing it to 0n would fail the gas check CLOSED on a healthy wallet;
+    // undefined fails it OPEN, which is the documented contract here.
+    if (result === null || result === undefined) return undefined;
+    return BigInt(result);
   } catch {
     return undefined;
   }
@@ -336,7 +340,7 @@ export async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
-      const transient = /fetch failed|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|socket hang up/i.test(
+      const transient = /fetch failed|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|socket hang up|HttpTimeoutError|exceeded \d+ms|timed out|abort/i.test(
         (err as Error)?.message ?? '',
       );
       if (!transient || i === attempts - 1) break;
@@ -359,6 +363,12 @@ const FEED_BASE_MS = 600;
  *  off the indexer, and serve the last good snapshot if a read fails outright,
  *  so a blip degrades to slightly-stale data instead of an empty board.      */
 const MARKETS_TTL_MS = 15_000;
+/** How old a fallback snapshot may be before it is refused outright. A stale
+ *  board is worse than no board: the expiries in it have already passed, so
+ *  orders built from it lock between read and send and revert TradingNotActive.
+ *  Past this age the read throws and every caller degrades loudly instead of
+ *  trading a ghost market list. */
+const MARKETS_CACHE_FALLBACK_MAX_MS = 120_000;
 let marketsCache: { rows: EventMarketRow[]; ts: number } | undefined;
 
 /** Coerce a possibly-string numeric field, dropping anything unusable. */
@@ -403,9 +413,21 @@ export async function listEventMarketRows(): Promise<EventMarketRow[]> {
     );
   } catch (err) {
     if (marketsCache) {
-      const ageSec = Math.round((Date.now() - marketsCache.ts) / 1000);
-      warn(`indexer read failed, serving ${ageSec}s-old snapshot:`, (err as Error).message);
-      return marketsCache.rows;
+      const ageMs = Date.now() - marketsCache.ts;
+      // Capped fallback: a snapshot older than two minutes is refused, not
+      // served. Call-chain safety was verified before capping — the agent cycle
+      // catches this into `errors` with no decisions, the per-user quote/scan
+      // path surfaces it through the tool guard, and `probeFeeds` converts it
+      // to `{ok:false}` for the waiting branch of the loop.
+      if (ageMs <= MARKETS_CACHE_FALLBACK_MAX_MS) {
+        const ageSec = Math.round(ageMs / 1000);
+        warn(`indexer read failed, serving ${ageSec}s-old snapshot:`, (err as Error).message);
+        return marketsCache.rows;
+      }
+      warn(
+        `indexer read failed and the snapshot is ${Math.round(ageMs / 1000)}s old ` +
+          `(past the ${MARKETS_CACHE_FALLBACK_MAX_MS / 1000}s fallback cap) — refusing to serve it`,
+      );
     }
     throw err;
   }
@@ -448,9 +470,16 @@ export async function listEventMarketRows(): Promise<EventMarketRow[]> {
   }
 
   // Scope to one venue when configured: a deployment hosts several venues
-  // intermixed in the indexer.
-  const venue = config.venueId;
-  const scoped = venue ? rows.filter((r) => r.venueId === venue) : rows;
+  // intermixed in the indexer. Compared trimmed and case-insensitive, so an
+  // indexer casing change cannot silently empty the board.
+  const venue = config.venueId?.trim().toLowerCase();
+  const scoped = venue ? rows.filter((r) => (r.venueId ?? '').trim().toLowerCase() === venue) : rows;
+  if (venue && scoped.length < rows.length) {
+    warn(
+      `venue filter dropped ${rows.length - scoped.length} of ${rows.length} window(s) ` +
+        `(VENUE_ID=${config.venueId}) — if the board looks empty, check the venue id first`,
+    );
+  }
 
   // Soonest-settling first. Near-expiry windows carry the least variance, so
   // their probabilities are the most decisive and edges appear there first; the
@@ -502,30 +531,64 @@ export async function listEventMarkets(): Promise<NormalizedMarket[]> {
 
 export const unifyEventMarkets = listEventMarkets;
 
-/** Look up one Event Contract window by its YES symbol. Served from the same
- *  short-lived cache as the market list, so the execution path can resolve the
- *  paired NO symbol without another indexer round-trip.                       */
+/** Look up one Event Contract window by either outcome's symbol. Served from the
+ *  same short-lived cache as the market list, so the execution path can resolve
+ *  the paired NO symbol without another indexer round-trip. A caller pastes back
+ *  whatever a previous tool printed, which may be the NO token it actually
+ *  bought — both name the same window. */
 export async function findEventMarket(yesSymbol: string): Promise<EventMarketRow | undefined> {
   const rows = await listEventMarketRows();
-  return rows.find((r) => r.yesSymbol === yesSymbol || r.symbol === yesSymbol);
+  return rows.find((r) => r.yesSymbol === yesSymbol || r.symbol === yesSymbol || r.noSymbol === yesSymbol);
 }
 
 /** Live spot for an asset ("BTC", "ETH") from Somnia's oracle price feed.
- *  Returns undefined when the feed has nothing for that asset.
+ *  Returns undefined when the feed has nothing for that asset, when the tick
+ *  carries no usable timestamp, or when the tick is older than the data-age
+ *  bound — a stale oracle served as fresh is how a blind agent looks fine.
  *
  *  fetchPrice rides the same chain WebSocket as the book reads, so it needs the
  *  same dead-socket healing: without it a silent WS death empties the signal's
  *  spot map, the agent falls back to consensus, and ??? looking healthy ??? simply
  *  never trades again. */
+/** Oracle timestamp of a price read, in ms. The SDK's typed field is
+ *  `blockTimestamp` (unix seconds, chain time); a millisecond `timestamp` is
+ *  tolerated where present. Undefined when the feed answered with no usable
+ *  time at all. */
+function oracleTsMs(p: { timestamp?: unknown; blockTimestamp?: unknown }): number | undefined {
+  const bt = typeof p.blockTimestamp === 'number' && Number.isFinite(p.blockTimestamp) ? p.blockTimestamp : undefined;
+  if (bt !== undefined) return bt * 1000;
+  const t = typeof p.timestamp === 'number' && Number.isFinite(p.timestamp) ? p.timestamp : undefined;
+  if (t === undefined) return undefined;
+  return t > 1e12 ? t : t * 1000; // ms vs seconds heuristic
+}
+
 export async function spotPrice(asset: string): Promise<number | undefined> {
   const source = `spot:${asset.toUpperCase()}`;
+  // Read via env directly rather than importing agent-config: agent-config is
+  // read by the broker which reads this module, so an import here risks a cycle
+  // for a number that is also a documented env knob.
+  const maxAgeMs = Number(process.env.AGENT_MAX_DATA_AGE_MS ?? 15_000);
   const read = async (): Promise<number | undefined> => {
     const ex = getExchange();
     const p = (await withRetry(`fetchPrice ${asset}`, () => ex.fetchPrice(asset), FEED_ATTEMPTS, FEED_BASE_MS)) as
-      | { price?: number; timestamp?: number }
+      | { price?: number; timestamp?: number; blockTimestamp?: number }
       | null;
     const price = p?.price;
     if (typeof price === 'number' && Number.isFinite(price) && price > 0) {
+      // The signal stamps Date.now() at read time, so an undated or stale oracle
+      // tick would otherwise be served as fresh. Enforce the oracle's own clock:
+      // no usable timestamp, or one older than the data-age bound, is a failed
+      // read, not a healthy one.
+      const ts = p ? oracleTsMs(p) : undefined;
+      if (ts === undefined) {
+        markFeed(source, false, 'oracle returned a price with no timestamp');
+        return undefined;
+      }
+      const ageMs = Date.now() - ts;
+      if (ageMs > maxAgeMs) {
+        markFeed(source, false, `oracle price is ${Math.round(ageMs / 1000)}s old (bound ${Math.round(maxAgeMs / 1000)}s)`);
+        return undefined;
+      }
       markFeed(source, true);
       return price;
     }
@@ -569,8 +632,18 @@ export async function recentCandles(
       .map((r) => ({ ts: Number(r[0]), close: Number(r[4]) }))
       .filter((c) => Number.isFinite(c.ts) && Number.isFinite(c.close) && c.close > 0)
       .sort((a, b) => a.ts - b.ts);
-    if (out.length > 0) markFeed(source, true);
-    else markFeed(source, false, 'candle feed returned no usable rows');
+    // The feed answers in 1m candles, so the newest close should be minutes old
+    // at most. A feed that keeps answering promptly with ancient candles is stale
+    // however healthy it looks — mark ok ONLY when the newest candle closed
+    // within 3x the 60s interval. The rows are still returned: this marks feed
+    // health (which the gates read), it does not reshape the series.
+    if (out.length === 0) {
+      markFeed(source, false, 'candle feed returned no usable rows');
+    } else {
+      const newestAgeMs = Date.now() - out[out.length - 1]!.ts;
+      if (newestAgeMs <= 3 * 60_000) markFeed(source, true);
+      else markFeed(source, false, `newest candle is ${Math.round(newestAgeMs / 1000)}s old`);
+    }
     return out;
   };
   try {
@@ -742,7 +815,15 @@ async function eventBookOnce(symbol: string, depth: number): Promise<BookTicker>
   const asks = (book?.asks ?? []).map((a) => [Number(a[0]), Number(a[1])] as [number, number]);
   const bid = bids[0]?.[0];
   const ask = asks[0]?.[0];
-  const mid = bid !== undefined && ask !== undefined ? (bid + ask) / 2 : bid ?? ask;
+  // Mid only when BOTH sides are present. A one-sided book has no meaningful
+  // midpoint: synthesising one from a lone bid (or ask) manufactures a "fair"
+  // the market never quoted, and every edge computation downstream reads it.
+  // Consumers verified before this change: pricing falls back to (bid+ask)/2,
+  // agent.ts guards `!== undefined` / falls back to 0 / r.mid, the per-user path
+  // skips books with neither side and falls back to decided.mid, and the MCP
+  // read tool passes `mid` through as optional. routes/agent.ts renders
+  // PendingTrade.mid, which is DecideResult.mid (always a number), not this.
+  const mid = bid !== undefined && ask !== undefined ? (bid + ask) / 2 : undefined;
   markFeed('book', true);
   return {
     symbol,

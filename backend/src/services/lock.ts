@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { DATA_DIR, log, warn } from '../config';
 
@@ -81,7 +81,35 @@ export function acquireLock(): void {
   }
   mkdirSync(DATA_DIR, { recursive: true });
   const doc: LockDoc = { pid: process.pid, startedAt: Date.now(), host: process.env.HOSTNAME };
-  writeFileSync(LOCK_PATH, JSON.stringify(doc, null, 2), 'utf8');
+  // Atomic take: 'wx' creates EXCLUSIVELY and fails with EEXIST when the file is
+  // already there. The old read-then-write had a TOCTOU window — two processes
+  // starting together could both read "no lock" and both write their own claim,
+  // which is exactly the interleaved-append corruption this file exists to stop.
+  try {
+    const fd = openSync(LOCK_PATH, 'wx');
+    try {
+      writeSync(fd, JSON.stringify(doc, null, 2), null, 'utf8');
+    } finally {
+      closeSync(fd);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    // Lost the race: someone created the file between our read and our take.
+    // Re-read and enforce — the winner's claim decides, not ours. Stale-lock
+    // takeover semantics are unchanged: a dead holder's file is taken over,
+    // anything else (or an unreadable file) keeps us out.
+    const winner = readLock();
+    if (winner && pidAlive(winner.pid) && winner.pid !== process.pid) {
+      throw new LockHeldError(winner);
+    }
+    if (winner) {
+      warn(
+        `stale lock from pid ${winner.pid} (no longer running) — taking over. ` +
+          'If that process died mid-cycle, run GET /api/agent/reconcile before trading.',
+      );
+    }
+    writeFileSync(LOCK_PATH, JSON.stringify(doc, null, 2), 'utf8');
+  }
   held = true;
   log(`instance lock acquired (pid ${process.pid})`);
 }

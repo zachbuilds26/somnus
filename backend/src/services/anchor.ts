@@ -72,6 +72,11 @@ export async function anchorProofHead(): Promise<{ txHash: string } | { skipped:
 }
 
 let lastAnchoredAt = 0;
+/** True while an anchor run is in flight. The 60s interval timer can fire while
+ *  a slow RPC round-trip from the previous run is still pending — without this,
+ *  overlapping runs would each read the nonce and each broadcast, double-paying
+ *  for the same anchor (or nonce-colliding and failing loudly). */
+let anchoring = false;
 
 /** Gate anchoring behind an interval (default 15 min) and the obvious preconditions.
  *  Cheap to call often; it only acts when due. */
@@ -80,6 +85,11 @@ export async function maybeAnchor(): Promise<void> {
   if (!(interval > 0)) return;
   if (config.dryRun) return;
   if (Date.now() - lastAnchoredAt < interval) return;
+  if (anchoring) {
+    debug('proof anchor skipped: previous run still in flight');
+    return;
+  }
+  anchoring = true;
   try {
     const r = await anchorProofHead();
     if ('txHash' in r) {
@@ -90,6 +100,8 @@ export async function maybeAnchor(): Promise<void> {
     }
   } catch (err) {
     warn('proof anchor failed:', describeNetworkError(err));
+  } finally {
+    anchoring = false;
   }
 }
 

@@ -12,6 +12,7 @@ import { perUserWalletsEnabled } from '../mcp/identity';
 import { alertsConfigured, recentAlerts } from '../services/alerts';
 import { lockInfo } from '../services/lock';
 import { currentAnchor, count, chainWriteFailure } from '../services/store';
+import { ledgerWriteFailure } from '../services/pnl';
 
 export const healthRouter: Router = Router();
 
@@ -159,6 +160,10 @@ healthRouter.get('/health', async (_req, res) => {
     // in memory, so without this a service whose disk is full reports a healthily
     // rising entry count while the audit trail is being lost on every restart.
     ...(chainWriteFailure() ? { proofChainWriteFailure: chainWriteFailure() } : {}),
+    // Same for the P&L ledger: the breakers read it from memory, so a failing
+    // disk looks like a flat day rather than a lost trail. Fill rows are not
+    // re-sweepable, so this one is the more urgent of the two.
+    ...(ledgerWriteFailure() ? { pnlLedgerWriteFailure: ledgerWriteFailure() } : {}),
     ts: Date.now(),
   });
 });

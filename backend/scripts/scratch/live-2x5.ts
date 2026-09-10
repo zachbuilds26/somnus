@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+throw new Error('archived probe — do not run');
 // Straight live — no dryRun, real testnet tx.
 // 2 x 5m windows, $5 each.
 

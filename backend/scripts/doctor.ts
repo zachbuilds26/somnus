@@ -12,12 +12,19 @@ const tick = (ok: boolean, label: string, extra = ''): void => {
   console.log(`${ok ? '✔' : '✖'} ${label}${extra ? ` — ${extra}` : ''}`);
 };
 
+/** Config echo, not a probe: nothing on this line was contacted. Ticking these
+ *  green implied connectivity that was never checked — a wrong RPC URL passed
+ *  the doctor right up until a real read failed. */
+const unprobed = (label: string): void => {
+  console.log(`○ ${label} (configured, not probed)`);
+};
+
 async function main(): Promise<void> {
   console.log('\n== Somnus doctor ==');
-  tick(true, `network ${config.network} (chain ${config.chainId})`);
-  tick(true, `rpc ${config.rpcUrl}`);
-  tick(true, `rest ${config.restUrl}`);
-  tick(true, `indexer (graphql) ${config.indexerUrl}`);
+  unprobed(`network ${config.network} (chain ${config.chainId})`);
+  unprobed(`rpc ${config.rpcUrl}`);
+  unprobed(`rest ${config.restUrl}`);
+  unprobed(`indexer (graphql) ${config.indexerUrl}`);
   tick(dryRun, `DRY_RUN ${dryRun}`, dryRun ? '(safe: no real orders)' : '⚠ real orders possible — keep tiny!');
   tick(Boolean(config.venueId), `VENUE_ID configured`, config.venueId ? '' : '(optional: unset reads every venue)');
   tick(key, `trade key present`, key ? '' : '(not needed for reads)');
@@ -56,14 +63,26 @@ async function main(): Promise<void> {
   console.log('\n== horizon calibration (which window classes it will trade) ==');
   try {
     const cal = calibrationSummary();
-    const measured = cal.source === 'measured';
-    tick(
-      measured,
-      measured
-        ? `verdicts measured on ${cal.windowsScored} settled windows (${cal.generatedAt?.slice(0, 10)})`
-        : 'no study run yet — using built-in defaults',
-      measured ? '' : 'run `npm run horizon-study` to measure this venue and widen the ladder',
-    );
+    // Three genuinely different claims: this deployment's own measurements,
+    // a committed seeded study (real numbers, but not this venue's own), or
+    // constants with no measurement behind them. Collapsing them misreports
+    // the evidence in both directions.
+    const when = cal.generatedAt?.slice(0, 10) ?? 'unknown date';
+    if (cal.source === 'measured') {
+      tick(true, `verdicts measured on ${cal.windowsScored} settled windows (${when}) — this deployment's own study`);
+    } else if (cal.source === 'seeded') {
+      tick(
+        true,
+        `verdicts from the committed seeded study (${cal.windowsScored} windows, ${when}) — real measurements, not this deployment's`,
+        'run `npm run horizon-study` to measure this venue',
+      );
+    } else {
+      tick(
+        false,
+        'no study run yet — using built-in defaults',
+        'run `npm run horizon-study` to measure this venue and widen the ladder',
+      );
+    }
     for (const c of cal.classes) {
       const mark = c.tier === 'validated' ? 'x' : c.tier === 'provisional' ? '~' : ' ';
       console.log(`   [${mark}] ${c.class.padStart(4)}  ${c.tier.padEnd(11)} ${c.note}`);

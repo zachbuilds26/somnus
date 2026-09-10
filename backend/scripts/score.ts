@@ -67,6 +67,12 @@ async function main(): Promise<void> {
     }
   }
   console.log(`orders considered: ${orders.length} (simulated + submitted)`);
+  // A score without its window is a number without a denominator: state the
+  // effective SINCE and the current time so two runs months apart cannot be
+  // compared as if they covered the same history.
+  console.log(
+    `window: ${process.env.BT_SINCE ? `BT_SINCE=${process.env.BT_SINCE}` : 'no BT_SINCE (genesis)'} → now ${new Date().toISOString()}`,
+  );
 
   const ex = getExchange();
   const rows = (await ex.client.listBinaryMarkets({ status: 'Finalized', limit: 1000 } as never)) as Array<

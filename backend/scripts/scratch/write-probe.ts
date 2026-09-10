@@ -7,6 +7,16 @@ import { config } from '../src/config';
 
 async function main(): Promise<void> {
   console.log(`dryRun(env)=${config.dryRun} mode(saved)=see config file`);
+  // The header promises this gate: without PROBE_YES=1 this is a read-only
+  // rehearsal that resolves a window and stops. Sending a real order takes an
+  // explicit opt-in on top of DRY_RUN=false, so a stray `npx tsx` never spends.
+  if (process.env.PROBE_YES !== '1') {
+    const rows = await listEventMarketRows();
+    const target = rows.find((r) => r.symbol.includes('BTC') && r.expiry && r.expiry > Date.now() / 1000 + 120);
+    console.log(`probe window: ${target?.symbol ?? '(none found)'}`);
+    console.log('read-only rehearsal — set PROBE_YES=1 (with DRY_RUN=false) to actually send.');
+    return;
+  }
   const ex = await getTradingExchangeReady(true);
   const rows = await listEventMarketRows();
   const target = rows.find((r) => r.symbol.includes('BTC') && r.expiry && r.expiry > Date.now() / 1000 + 120);

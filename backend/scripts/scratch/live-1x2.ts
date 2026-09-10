@@ -1,3 +1,4 @@
+throw new Error('archived probe — do not run');
 delete process.env.FAIR_OVERRIDE_BTC;
 delete process.env.FAIR_OVERRIDE_ETH;
 process.env.AGENT_MAX_HORIZON_SEC='900';

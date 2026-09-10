@@ -15,6 +15,7 @@ import { acquireLock, LockHeldError, releaseLock } from './services/lock';
 import { checkClockSkew } from './services/clock';
 import { logWalletState } from './services/wallet';
 import { alertsConfigured } from './services/alerts';
+import { RateLimiter } from './services/rate-limit';
 
 
 const app = express();
@@ -92,6 +93,30 @@ if (config.apiKey) {
     res.status(401).json({ ok: false, error: 'missing or invalid X-API-Key' });
   });
 }
+
+/** Bound how often state-changing routes can be hit, per client IP.
+ *
+ *  The gateway key (above) answers "may you", this answers "how often": with no
+ *  key configured the API is loopback-only but still reachable by every local
+ *  process, and a tight local loop POSTing /agent/run could otherwise stack
+ *  expensive cycles. Generous on purpose — 120/min is far above legitimate use
+ *  and a 429 here must never surprise an operator mid-demo. Uses the existing
+ *  RateLimiter read-only (its module is owned elsewhere; this only constructs).
+ *  `trust proxy 1` above keeps the per-IP key honest behind the host's proxy. */
+const mutateLimiter = new RateLimiter(Number(process.env.SOMNUS_MUTATE_RATE_LIMIT ?? 120), 60_000);
+app.use((req, res, next) => {
+  if (!MUTATING.has(req.method)) return next();
+  if (KEY_EXEMPT_PATHS.has(req.path)) return next();
+  const verdict = mutateLimiter.check(req.ip ?? 'unknown');
+  if (!verdict.ok) {
+    res
+      .status(429)
+      .set('retry-after', String(verdict.retryAfterSec ?? 60))
+      .json({ ok: false, error: `rate limit: ${verdict.used} mutating requests in the last minute (limit ${verdict.limit})` });
+    return;
+  }
+  next();
+});
 
 app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'somnus-backend', docs: '/api/health' });
@@ -215,13 +240,26 @@ async function preflight(): Promise<void> {
 export function start(): void {
   installProcessGuards();
   setSigner(createConfiguredSigner());
-  void preflight().then(() => {
-    // Optionally resume the autonomous loop on boot (AGENT_AUTOSTART=true). Off by
-    // default so a process that boots trading the moment it starts is never the
-    // default for something holding a key. After preflight, so a locked data dir or
-    // a broken clock is known before any order can be placed.
-    maybeAutostart();
-  });
+  void preflight()
+    .then(() => {
+      // Optionally resume the autonomous loop on boot (AGENT_AUTOSTART=true). Off by
+      // default so a process that boots trading the moment it starts is never the
+      // default for something holding a key. After preflight, so a locked data dir or
+      // a broken clock is known before any order can be placed.
+      maybeAutostart();
+    })
+    // A failed preflight must NEVER leave the API serving unlocked: without the
+    // lock, this process shares the data dir with whatever holds it, and the two
+    // interleave proof-chain appends while double-spending the position budget.
+    .catch((err) => {
+      console.error(`[somnus] preflight failed — refusing to serve: ${(err as Error)?.message ?? err}`);
+      try {
+        releaseLock();
+      } catch {
+        /* nothing held */
+      }
+      process.exit(1);
+    });
   // Periodically anchor the proof-chain head on-chain so the audit trail is
   // tamper-evident externally, not just on this machine.
   setInterval(() => void maybeAnchor(), 60_000).unref?.();

@@ -7,6 +7,27 @@
 
 const BASE = process.env.AUDIT_BASE ?? 'http://localhost:4545/api';
 
+// This script sends hostile input (malformed JSON, prototype pollution, absurd
+// config values) at a running server. Refuse a non-loopback target unless the
+// operator opts in: pointed at a hosted deploy by accident, this would write
+// hostile limits into somebody else's live agent. The config snapshot/restore +
+// loop-restart dance would make it safer, but that is a bigger change — the
+// guard suffices to stop the dangerous mistake.
+if (process.env.ALLOW_REMOTE_AUDIT !== '1') {
+  let host = '';
+  try {
+    host = new URL(BASE).hostname.toLowerCase();
+  } catch {
+    throw new Error(`AUDIT_BASE=${JSON.stringify(BASE)} is not a valid URL — refusing to audit it`);
+  }
+  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') {
+    throw new Error(
+      `refusing to audit non-localhost ${BASE} — this script sends hostile input. ` +
+        'Set ALLOW_REMOTE_AUDIT=1 only if you truly mean to audit a remote host.',
+    );
+  }
+}
+
 interface Case {
   name: string;
   method: string;

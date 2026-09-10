@@ -34,10 +34,31 @@ const NETWORKS: Record<
   },
 };
 
-function bool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name];
+/** Strict boolean parse for fail-closed flags. Only explicit 'true'/'1' enable and
+ *  only explicit 'false'/'0' disable; anything else falls back. Pure — no logging,
+ *  so it is safe to unit-test and to call before `config` exists. */
+export function parseBoolStrict(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined || raw === '') return fallback;
-  return raw.toLowerCase() === 'true' || raw === '1';
+  const v = raw.trim().toLowerCase();
+  if (v === 'true' || v === '1') return true;
+  if (v === 'false' || v === '0') return false;
+  return fallback;
+}
+
+/** Fail-closed parse for DRY_RUN: only explicit 'false'/'0' disable it.
+ *
+ *  The old `bool()` treated ANY non-'true' value (including a typo like 'flase')
+ *  as false — one misspelling away from live trading. Unrecognized values fall
+ *  back to true and are logged. Uses console.* directly: `log()` reads `config`,
+ *  which is still in TDZ while `readConfig()` runs, so calling it here would throw
+ *  a ReferenceError instead of logging. */
+export function parseDryRun(raw: string | undefined): boolean {
+  if (raw === undefined || raw === '') return true;
+  const v = raw.trim().toLowerCase();
+  if (v === 'false' || v === '0') return false;
+  if (v === 'true' || v === '1') return true;
+  console.log(`[somnus] DRY_RUN=${JSON.stringify(raw)} unrecognized — failing closed to true`);
+  return true;
 }
 
 export interface SomnusConfig {
@@ -72,6 +93,15 @@ function readConfig(): SomnusConfig {
   const rawMode = (process.env.AGENT_MODE ?? 'dry-run').toLowerCase();
   const mode: AgentMode = rawMode === 'live' || rawMode === 'view' ? rawMode : 'dry-run';
 
+  // A non-numeric PORT (a typo, an empty export) must not boot the API on NaN.
+  // Fall back to 4545 rather than refusing: the port is addressing, not authority.
+  const rawPort = Number(process.env.PORT ?? 4545);
+  const port = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 4545;
+  if (!Number.isFinite(rawPort) || rawPort <= 0) {
+    // console.* directly — see parseDryRun for why log() is unsafe here.
+    console.warn(`[somnus:warn] PORT=${JSON.stringify(process.env.PORT)} invalid — listening on 4545`);
+  }
+
   return {
     network,
     chainId: net.chainId,
@@ -80,9 +110,9 @@ function readConfig(): SomnusConfig {
     indexerUrl: process.env.INDEXER_URL || net.indexerUrl,
     wsRpcUrl: process.env.WS_RPC_URL || net.wsRpcUrl,
     venueId: process.env.VENUE_ID || undefined,
-    port: Number(process.env.PORT ?? 4545),
+    port,
     apiKey: process.env.SOMNUS_API_KEY || undefined,
-    dryRun: bool('DRY_RUN', true) || mode === 'dry-run',
+    dryRun: parseDryRun(process.env.DRY_RUN) || mode === 'dry-run',
     privateKey: process.env.PRIVATE_KEY || undefined,
     operatorKey: process.env.OPERATOR_KEY || undefined,
     tradeKey: process.env.TRADE_KEY || undefined,

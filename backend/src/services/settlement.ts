@@ -183,6 +183,12 @@ export async function findClaimable(address?: string): Promise<ClaimScan> {
 
   const inputs: Array<Record<string, any>> = [];
   const meta = new Map<string, { asset?: string; expiry?: number; voided: boolean; decimals: number }>();
+  // Markets whose winning outcome is KNOWN (resolved to 0/1, or voided where both
+  // sides redeem). A settled-looking position with no known winner is deferred to
+  // a later sweep — recording a 0-payout loss before the winner is known invents
+  // a loss that a subsequent scan would have to un-invent.
+  const knownOutcomeKeys = new Set<string>();
+  let venueFiltered = 0;
 
   for (const p of positions) {
     const m = (p.market ?? {}) as Record<string, any>;
@@ -190,8 +196,16 @@ export async function findClaimable(address?: string): Promise<ClaimScan> {
     if (!marketId) continue;
 
     // Scope to one venue when configured. Portfolio rows don't always carry
-    // venueId, so only filter when the field is actually present.
-    if (config.venueId && m.venueId && String(m.venueId) !== config.venueId) continue;
+    // venueId, so only filter when the field is actually present. Compared
+    // trimmed and case-insensitive: an indexer casing change must not silently
+    // empty the claim scan.
+    if (config.venueId && m.venueId) {
+      const rowVenue = String(m.venueId).trim().toLowerCase();
+      if (rowVenue !== config.venueId.trim().toLowerCase()) {
+        venueFiltered++;
+        continue;
+      }
+    }
 
     const amount = toBig(p.balance);
     if (amount <= 0n) continue;
@@ -217,12 +231,20 @@ export async function findClaimable(address?: string): Promise<ClaimScan> {
       status: String(m.status ?? ''),
       settlementFeeBps: SETTLEMENT_FEE_BPS,
     });
+    const won = m.winningOutcome === null || m.winningOutcome === undefined ? undefined : Number(m.winningOutcome);
+    if (Boolean(m.voided) || won === 0 || won === 1) knownOutcomeKeys.add(`${marketId}:${outcomeIdx}`);
   }
 
   // The SDK decides what's actually claimable: winner side, or either side on a
   // voided market (both redeem at half). Loser and still-trading are dropped.
   const claimable = claimableFrom(inputs as never) as ClaimablePosition[];
   debug(`settlement: ${positions.length} position(s) held, ${claimable.length} claimable`);
+  if (venueFiltered > 0) {
+    warn(
+      `settlement: venue filter dropped ${venueFiltered} of ${positions.length} position(s) ` +
+        `(VENUE_ID=${config.venueId}) — if winnings vanish, check the venue id first`,
+    );
+  }
 
   // Anything settled (Finalized/Resolved/Voided) that the SDK did NOT return as
   // claimable is a realised loss for the side we held — record it so P&L reflects
@@ -235,6 +257,11 @@ export async function findClaimable(address?: string): Promise<ClaimScan> {
     const marketId = String(m.id ?? '');
     const outcomeIdx: 0 | 1 = Number(p.outcomeIndex) === 1 ? 1 : 0;
     if (!marketId || wonKeys.has(`${marketId}:${outcomeIdx}`)) continue;
+    // Only a loss when the winner is known. A settled status with no winning
+    // outcome on record is left for a later sweep — the indexer trails the
+    // chain, and a premature 0 would realise a loss on a position that may
+    // still redeem.
+    if (!knownOutcomeKeys.has(`${marketId}:${outcomeIdx}`)) continue;
     settledLosers.push({ marketId, outcomeIdx });
   }
 
@@ -502,6 +529,15 @@ async function executeClaim(): Promise<ClaimResult> {
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
     warn('claim failed:', msg);
+    // Own dedupe key, deliberately separate from 'settlement-sweep-failed': a
+    // failed sweep and a failed claim are different incidents (correctness vs
+    // custody), and sharing a key would let one swallow the other for 15 minutes.
+    raiseAlert({
+      level: 'warning',
+      key: 'settlement-claim-failed',
+      title: 'claim failed — winnings stay as outcome tokens, not collateral',
+      detail: { error: msg, positions: scan.claimable.length },
+    });
     await appendEntry({
       kind: 'claim',
       payload: {

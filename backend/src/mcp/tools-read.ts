@@ -174,19 +174,31 @@ export function registerReadTools(server: McpServer): void {
       report(`re-linking ${all.length} entries`, 0, all.length);
       const result = verifyChain('0'.repeat(64), all);
       const expected = signerAddress();
+      // Same newest-first budget as the HTTP route (same env knob): signature
+      // recovery is ~36ms a pop, and this tool used to spend it on EVERY entry —
+      // past 2,800 on the live chain — while linkage (the cheap half) already
+      // covered all of them. Newest first, because a reader asking whether this
+      // chain is honest cares about what was written since they last looked.
+      const maxChecks = Number(process.env.SOMNUS_MAX_SIGNATURE_CHECKS ?? 400);
       let checked = 0;
       let valid = 0;
       let unsigned = 0;
+      let skipped = 0;
       // The slow half by a wide margin: one ECDSA public-key recovery per entry, and
       // the chain is already past 2,800. Reported every 100 rather than every entry —
       // a notification per signature would cost more than the verification.
       const STEP = 100;
-      for (const e of all) {
+      for (let i = all.length - 1; i >= 0; i--) {
+        const e = all[i]!;
         if (typeof e.signature !== 'string' || e.signature.length === 0) {
           unsigned++;
           continue;
         }
         if (!expected) continue;
+        if (checked >= maxChecks) {
+          skipped++;
+          continue;
+        }
         checked++;
         if (checked % STEP === 0) {
           report(`verified ${checked} signatures of ${all.length} entries`, checked, all.length);
@@ -203,9 +215,20 @@ export function registerReadTools(server: McpServer): void {
         linkageOk: result.ok,
         headMatches,
         signaturesOk,
+        signaturesComplete: skipped === 0,
         signaturesChecked: checked,
         signaturesValid: valid,
         unsignedEntries: unsigned,
+        ...(skipped > 0
+          ? {
+              signaturesSkipped: skipped,
+              signatureCoverage:
+                `signatures were verified over the most recent ${checked} signed entries; ` +
+                `${skipped} older ones were not checked in this request. Linkage covered all ` +
+                `${result.checked}. Re-run with a higher SOMNUS_MAX_SIGNATURE_CHECKS, or page ` +
+                'through the rest with {prevAnchor, entries} on POST /api/proof/verify.',
+            }
+          : {}),
         entriesChecked: result.checked,
         totalEntries: count(),
         signer: expected,
