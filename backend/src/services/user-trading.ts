@@ -4,7 +4,7 @@ import { loadAgentConfig } from '../agent-config';
 import { crossingPrice, resolveFill } from './broker';
 import { clockState } from './clock';
 import { horizonPolicy, type TradeablePolicy } from './horizon';
-import { decideFromFair } from './pricing';
+import { decideFromFair, momentumBreak } from './pricing';
 import { dataFresh, riskStatus } from './risk';
 import {
   eventBook,
@@ -545,6 +545,47 @@ export function sizingNote(
   return parts.join(' ');
 }
 
+/** Momentum breaker knobs: the same falling-knife guard the agent's own cycle
+ *  applies (see agent.ts) — how far the book may move AGAINST an intended side,
+ *  over how long, before the window is skipped as suspect. Read from the same
+ *  env so one tuning covers both paths. */
+const USER_MOM_BREAK_PP = Number(process.env.AGENT_MOM_BREAK_PP ?? 0.08);
+const USER_MOM_WINDOW_MS = Number(process.env.AGENT_MOM_WIN_MS ?? 600_000);
+
+/** Last-seen mids per window symbol — cross-call memory so the breaker sees a
+ *  book collapse ACROSS quotes, which is exactly how the 2026-08-26 loss
+ *  happened (three consecutive cycles re-rating a stampeding window as a
+ *  bargain). The per-user path used to keep no such memory — every quote was
+ *  stateless — so a caller re-quoting into a stampede was offered the same
+ *  "bargain" each time while the operator's own cycle refused it. */
+const userMidHistory = new Map<string, Array<{ ts: number; mid: number }>>();
+
+/** Record this book read and say whether the book has moved hard against an
+ *  intended side since the earliest reading inside the window. Exported for tests. */
+export function userMomentumBlocked(
+  symbol: string,
+  mid: number | undefined,
+  action: 'BUY_YES' | 'BUY_NO',
+  now = Date.now(),
+): { blocked: boolean; movedPp: number } {
+  const hist = (userMidHistory.get(symbol) ?? []).filter((h) => now - h.ts <= USER_MOM_WINDOW_MS);
+  const prevMid = hist.length > 0 ? hist[0]!.mid : undefined;
+  if (mid !== undefined) {
+    hist.push({ ts: now, mid });
+    userMidHistory.set(symbol, hist.slice(-8));
+  }
+  if (prevMid === undefined || mid === undefined) return { blocked: false, movedPp: 0 };
+  return {
+    blocked: momentumBreak(prevMid, mid, action, { moveThreshold: USER_MOM_BREAK_PP }),
+    movedPp: (mid - prevMid) * 100,
+  };
+}
+
+/** Forget recorded mids. For tests. */
+export function resetUserMidHistory(): void {
+  userMidHistory.clear();
+}
+
 /** Price one window for a caller, or say why it is not tradeable.
  *
  *  Every number here comes from the same functions the agent's own cycle uses, so a
@@ -594,6 +635,20 @@ async function priceWindow(
   });
   if (decided.action !== 'BUY_YES' && decided.action !== 'BUY_NO') {
     return { skipped: `${decided.reason} (${decided.pricedNote})` };
+  }
+
+  // Order-flow circuit breaker — the same falling-knife guard the agent's own
+  // cycle applies (see agent.ts). A book moving hard against the intended side
+  // is more likely informed flow than a bargain the model alone can see, and
+  // the model cannot see order flow at all.
+  const mom = userMomentumBlocked(market.symbol, book.mid ?? decided.mid, decided.action);
+  if (mom.blocked) {
+    const side = decided.action === 'BUY_YES' ? 'Up' : 'Down';
+    return {
+      skipped:
+        `momentum breaker: book mid moved ${mom.movedPp.toFixed(1)}pp against ${side} within ` +
+        `${Math.round(USER_MOM_WINDOW_MS / 1000)}s — skipped: order flow moving hard against the side`,
+    };
   }
 
   const isUp = decided.action === 'BUY_YES';
@@ -654,9 +709,18 @@ async function priceWindow(
   };
 }
 
-interface Candidate {
+export interface Candidate {
   market: EventMarketRow;
   policy: TradeablePolicy;
+}
+
+/** Soonest expiry first; windows with no expiry sort last. Exported for tests. */
+export function sortCandidatesByExpiry<T extends { market: { expiry?: number } }>(cands: T[]): T[] {
+  return [...cands].sort((a, b) => {
+    const ea = a.market.expiry ?? Number.POSITIVE_INFINITY;
+    const eb = b.market.expiry ?? Number.POSITIVE_INFINITY;
+    return ea - eb;
+  });
 }
 
 /** Live windows a caller's order could actually land on, soonest-settling first.
@@ -677,9 +741,10 @@ async function tradeableWindows(symbols?: string[]): Promise<Candidate[]> {
     const policy = horizonPolicy(market.intervalSec, left);
     if (policy.tier === 'blocked') continue;
     out.push({ market, policy: { ...policy, tier: policy.tier } });
-    if (out.length >= SCAN_WINDOWS) break;
   }
-  return out;
+  // Soonest-settling first: the scan that follows prices only a capped few, so
+  // the cap must take the windows nearest resolution rather than indexer order.
+  return sortCandidatesByExpiry(out).slice(0, SCAN_WINDOWS);
 }
 
 /** Resolve one window by symbol, accepting either outcome's symbol.
