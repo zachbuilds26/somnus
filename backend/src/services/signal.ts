@@ -129,12 +129,17 @@ export function horizonVolatility(closes: number[], minutes: number): HorizonVol
   }
 
   if (direct === undefined && scaled === undefined) return undefined;
-  if (direct === undefined) return { sigma: scaled!, method: `1m x sqrt(${k})` };
-  if (scaled === undefined) return { sigma: direct, method: directLabel };
+  // Floor at 10bp/min: near-zero measured sigma pins fair at 0.01/0.99 — fake
+  // certainty on noise — so a flat tape must widen the estimate, not sharpen it.
+  const floor = 0.001 * Math.sqrt(k);
+  const floored = (sigma: number, method: string): HorizonVol =>
+    sigma >= floor ? { sigma, method } : { sigma: floor, method: `${method}, floored` };
+  if (direct === undefined) return floored(scaled!, `1m x sqrt(${k})`);
+  if (scaled === undefined) return floored(direct, directLabel);
 
   return direct >= scaled
-    ? { sigma: direct, method: directLabel }
-    : { sigma: scaled, method: `1m x sqrt(${k}) (> ${directLabel})` };
+    ? floored(direct, directLabel)
+    : floored(scaled, `1m x sqrt(${k}) (> ${directLabel})`);
 }
 
 /** Std dev of overlapping k-step log returns. */
@@ -183,9 +188,12 @@ export function referenceLevel(row: EventMarketRow, spot: number): number | unde
       best = candidate;
     }
   }
-  // Even the best scale more than ~5x from spot means we don't understand the
-  // units; skipping is strictly better than trading on a bogus level.
-  if (best === undefined || bestRatio > Math.log(5)) return undefined;
+  // Even the best scale more than ~3x from spot means we don't understand the
+  // units; skipping is strictly better than trading on a bogus level. 3x, not
+  // 5x: a true scale within 3x always beats its 10x-off phantom >=3.33x away,
+  // so the tighter band provably eliminates moneyness inversion; the cost is
+  // refusing genuinely far-OTM windows.
+  if (best === undefined || bestRatio > Math.log(3)) return undefined;
   return best;
 }
 

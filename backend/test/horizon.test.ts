@@ -3,6 +3,7 @@ import { writeFileSync, rmSync } from 'node:fs';
 import { afterEach, test } from 'node:test';
 import {
   CALIBRATION_PATH,
+  edgeFloorForCalErr,
   expiryHeadroomSec,
   governingRegime,
   horizonLabel,
@@ -180,6 +181,15 @@ test('scales expiry headroom to the window class', () => {
   assert.equal(expiryHeadroomSec(Number.NaN), MIN_EXPIRY_HEADROOM_SEC);
 });
 
+test('a measured row stamps its edge floor onto the policy', () => {
+  writeCalibration([
+    { classSec: 300, n: 100, brier: 0.19, base: 0.249, calErr: 0.056, tier: 'validated', note: 'x' },
+  ]);
+  const p = horizonPolicy(300, 290);
+  assert.equal(p.tier, 'validated');
+  assert.ok(Math.abs((p.edgeFloor ?? 0) - 0.122) < 1e-9);
+});
+
 test('applies the scaled headroom in the policy', () => {
   // 44s left on a 5m window fails the 45s bar, and says so.
   const q = horizonPolicy(300, 44);
@@ -188,4 +198,39 @@ test('applies the scaled headroom in the policy', () => {
   // 200s left clears headroom; the regime gate then decides (provisional here).
   const p = horizonPolicy(300, 200);
   assert.equal(p.tier, 'provisional');
+});
+
+// Per-class edge floor: retained edge after crossing is ~D/2, so break-even
+// decision edge is 2x calErr (+1pp gas/slippage). Seed-measured rows pin the
+// expected values; JSON turns NaN calErr into null, which floors to nothing.
+test('floors the required edge at 2x measured calibration error', () => {
+  assert.ok(Math.abs(edgeFloorForCalErr(0.056)! - 0.122) < 1e-12);
+  assert.ok(Math.abs(edgeFloorForCalErr(0.044)! - 0.098) < 1e-12);
+  assert.ok(Math.abs(edgeFloorForCalErr(0.215)! - 0.44) < 1e-12);
+  assert.equal(edgeFloorForCalErr(Number.NaN), undefined);
+  assert.equal(edgeFloorForCalErr(Number.POSITIVE_INFINITY), undefined);
+
+  writeCalibration([
+    { classSec: 300, n: 50, brier: 0.19, base: 0.25, calErr: 0.056, tier: 'validated', note: 'seed-like 5m' },
+    { classSec: 900, n: 50, brier: 0.18, base: 0.25, calErr: 0.044, tier: 'validated', note: 'seed-like 15m' },
+    { classSec: 3600, n: 50, brier: 0.2, base: 0.25, calErr: 0.215, tier: 'provisional', note: 'seed-like 1h' },
+    { classSec: 14400, n: 12, brier: 0.21, base: 0.25, calErr: Number.NaN, tier: 'provisional', note: 'unmeasured calibration' },
+  ]);
+  assert.ok(Math.abs(horizonPolicy(300, 290).edgeFloor! - 0.122) < 1e-12);
+  assert.ok(Math.abs(horizonPolicy(900, 890).edgeFloor! - 0.098) < 1e-12);
+  assert.ok(Math.abs(horizonPolicy(3600, 3540).edgeFloor! - 0.44) < 1e-12);
+  assert.equal(horizonPolicy(14400, 14340).edgeFloor, undefined);
+});
+
+test('sets no edge floor where no regime measurement applies', () => {
+  writeCalibration([
+    { classSec: 60, n: 786, brier: 0.25, base: 0.2496, calErr: 0.019, tier: 'blocked', note: 'no better than base rate' },
+    { classSec: 900, n: 50, brier: 0.15, base: 0.25, calErr: 0.09, tier: 'validated', note: 'measured' },
+  ]);
+  // Blocked early-return path: no floor, the window is refused anyway.
+  assert.equal(horizonPolicy(60, 50).edgeFloor, undefined);
+  // Far outside anything measured: provisional with no regime, so no floor.
+  const far = horizonPolicy(86400, 86300);
+  assert.equal(far.tier, 'provisional');
+  assert.equal(far.edgeFloor, undefined);
 });

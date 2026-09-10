@@ -70,7 +70,9 @@ function scaleReference(raw: string, spot: number): number | undefined {
       best = c;
     }
   }
-  return best !== undefined && bestRatio <= Math.log(5) ? best : undefined;
+  // Same 3x band as live trading (signal.ts referenceLevel): the study must
+  // score the windows the agent would actually take, not ones it refuses.
+  return best !== undefined && bestRatio <= Math.log(3) ? best : undefined;
 }
 
 async function main(): Promise<void> {
@@ -192,8 +194,11 @@ async function main(): Promise<void> {
     //   brier < base      — the model must beat simply predicting the base rate.
     //   calErr < 0.15     — and its stated probabilities must mean something, or
     //                       a good Brier is just a lucky directional call.
+    //                       Unmeasurable calibration (NaN — no band held enough
+    //                       samples) FAILS this gate: passing it would promote a
+    //                       class whose probabilities were never checked.
     const enoughData = preds.length >= MIN_SAMPLES;
-    const ok = enoughData && brier < brierBase && (Number.isNaN(calErr) || calErr < 0.15);
+    const ok = enoughData && brier < brierBase && !Number.isNaN(calErr) && calErr < 0.15;
     verdicts.push({ interval, ok, n: preds.length });
     const verdict = ok
       ? 'VALIDATED     '
@@ -243,11 +248,17 @@ async function main(): Promise<void> {
     }
   }
 
+  // windowsScored counts rows that actually entered a class verdict (sum of
+  // class n), not rows fetched — rows skipped for stale candles, missing vol
+  // or an unscalable reference never informed a tier. btLimit/btCandles record
+  // the env knobs so a later reader knows what produced this file.
   const doc: CalibrationFile = {
     generatedAt: new Date().toISOString(),
     leadFraction: LEAD_FRACTION,
     minSamples: MIN_SAMPLES,
-    windowsScored: usable.length,
+    windowsScored: measured.reduce((a, m) => a + m.n, 0),
+    btLimit: LIMIT,
+    btCandles: CANDLE_DEPTH,
     classes: measured.sort((a, b) => a.classSec - b.classSec),
   };
   writeFileSync(CALIBRATION_PATH, `${JSON.stringify(doc, null, 2)}

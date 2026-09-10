@@ -46,6 +46,14 @@ export interface HorizonPolicy {
   edgeMultiplier: number;
   /** Multiplier on the operator's `maxTradeSize`. <1 means "stake less". */
   sizeMultiplier: number;
+  /** Absolute floor on the required edge, from the governing regime's measured
+   *  calibration error (2x calErr + 1pp gas/slippage margin). Retained edge
+   *  after crossing is ~half the decision edge, so a class miscalibrated by
+   *  calErr needs 2x calErr at decision time to break even — callers must use
+   *  max(minEdge * edgeMultiplier, edgeFloor ?? 0) as the bar. Undefined where
+   *  no regime measurement applies (blocked windows, unmeasured horizons):
+   *  there is no calibration to floor from. */
+  edgeFloor?: number;
   /** Why this tier — recorded in the proof entry. */
   note: string;
 }
@@ -106,7 +114,13 @@ export interface CalibrationFile {
   generatedAt: string;
   leadFraction: number;
   minSamples: number;
+  /** Rows that actually entered a class verdict (sum of class n) — not rows
+   *  fetched. Skipped rows never informed a tier. */
   windowsScored: number;
+  /** `BT_LIMIT` for this run. Optional so older files still parse. */
+  btLimit?: number;
+  /** `BT_CANDLES` for this run. Optional so older files still parse. */
+  btCandles?: number;
   classes: CalibrationRow[];
 }
 
@@ -315,11 +329,25 @@ export function horizonLabel(sec: number): string {
   return `${sec}s`;
 }
 
+/** Absolute edge floor for a measured calibration error.
+ *
+ *  Prior audit: retained edge after crossing is ~D/2 (decision edge halved by
+ *  crossingPrice), so break-even decision edge D* = 2x calErr per class, plus
+ *  1pp for gas/slippage. NaN (unmeasurable calibration) yields no floor —
+ *  there is nothing measured to floor from. */
+export function edgeFloorForCalErr(calErr: number): number | undefined {
+  if (!Number.isFinite(calErr)) return undefined;
+  return 2 * calErr + 0.01;
+}
+
 /** Classify a window. `secondsLeft` gates execution timing; `intervalSec` gates
  *  which measured regime the model is being asked to work in. Both matter and they
  *  are not the same number — a 24h window with 80s left is a near-expiry coin flip
  *  wearing a long-horizon label, so the binding constraint is whichever is
- *  smaller. */
+ *  smaller.
+ *
+ *  The returned `edgeFloor` comes from the governing regime's calErr; callers
+ *  must use max(minEdge * edgeMultiplier, edgeFloor ?? 0) as the bar. */
 export function horizonPolicy(intervalSec: number | undefined, secondsLeft: number): HorizonPolicy {
   const classSec = windowClass(intervalSec, secondsLeft);
   const label = horizonLabel(classSec);
@@ -329,6 +357,7 @@ export function horizonPolicy(intervalSec: number | undefined, secondsLeft: numb
     label,
     edgeMultiplier: 1,
     sizeMultiplier: 0,
+    edgeFloor: undefined,
     note,
   });
 
@@ -359,6 +388,7 @@ export function horizonPolicy(intervalSec: number | undefined, secondsLeft: numb
       label,
       edgeMultiplier: 1,
       sizeMultiplier: 1,
+      edgeFloor: edgeFloorForCalErr(regime.calErr),
       note: `${label} window in the validated ${regimeLabel} regime — ${regime.note}`,
     };
   }
@@ -369,6 +399,7 @@ export function horizonPolicy(intervalSec: number | undefined, secondsLeft: numb
     label,
     edgeMultiplier: PROVISIONAL_EDGE_MULT,
     sizeMultiplier: PROVISIONAL_SIZE_MULT,
+    edgeFloor: regime ? edgeFloorForCalErr(regime.calErr) : undefined,
     note:
       `${label} window is unvalidated (${regime ? `${regimeLabel} regime: ${regime.note}` : 'no measured regime covers this horizon'}) ` +
       `— demanding ${PROVISIONAL_EDGE_MULT}x edge at ${PROVISIONAL_SIZE_MULT}x size`,

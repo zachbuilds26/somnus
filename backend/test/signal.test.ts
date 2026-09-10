@@ -103,6 +103,24 @@ describe('signal.volatility', () => {
     // Horizon far beyond the history must fall back and say so.
     assert.match(horizonVolatility(series, 5000)!.method, /scaled to/);
   });
+
+  it('floors sigma at 10bp/min on a near-flat tape', () => {
+    // Tiny but nonzero variance: without the floor the model would claim
+    // near-certainty (fair pinned at 0.01/0.99) on what is just noise.
+    const k = 5;
+    const floor = 0.001 * Math.sqrt(k);
+    const flat = Array.from({ length: 60 }, (_, i) => 100 + (i % 2 ? 0.0001 : -0.0001));
+    const h = horizonVolatility(flat, k)!;
+    assert.ok(h.sigma >= floor - 1e-15, `sigma ${h.sigma} fell below the ${floor} floor`);
+    assert.match(h.method, /, floored/);
+  });
+
+  it('leaves a normal series untouched (no floored label)', () => {
+    const series = Array.from({ length: 120 }, (_, i) => 100 + Math.sin(i / 3));
+    const h = horizonVolatility(series, 10)!;
+    assert.match(h.method, /10m direct/);
+    assert.doesNotMatch(h.method, /, floored/);
+  });
 });
 
 describe('signal.referenceLevel', () => {
@@ -123,6 +141,17 @@ describe('signal.referenceLevel', () => {
   // Guards against silently trading a 100x-wrong level if upstream rescales.
   it('refuses a level implausibly far from spot', () => {
     assert.equal(referenceLevel(row({ strikeRaw: '1' }), 78700), undefined);
+  });
+
+  it('refuses a level 3-5x from spot (phantom-scale guard)', () => {
+    // strikeRaw 1000 against spot 316: the nearest scale (100) sits ~3.16x
+    // away — inside the old 5x band, outside the 3x one. Accepting it risked
+    // moneyness inversion against a 10x-off phantom; a true scale within 3x
+    // always beats its phantom (>=3.33x away), so the tighter band provably
+    // cannot invert. Cost: genuinely far-OTM windows like this one are refused.
+    assert.equal(referenceLevel(row({ strikeRaw: '1000' }), 316), undefined);
+    // Just inside the band still trades.
+    assert.equal(referenceLevel(row({ strikeRaw: '1000' }), 250), 100);
   });
 
   it('returns undefined with no strike and no opening price', () => {
