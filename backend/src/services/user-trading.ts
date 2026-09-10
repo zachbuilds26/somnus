@@ -73,9 +73,33 @@ export function userTradingMode(): UserTradingMode {
  *  caller has to draw again, which is enough to demo a real position rather than a
  *  rounding error. It is also why `confirm: true` exists — at this cap a stray tool
  *  call would be a large bet, so nothing is ever sent on a single unconfirmed call. */
+/** Parse a per-user limit env knob where 0 is a valid setting (feature off).
+ *
+ *  0 means OFF, not missing: a 0 max-trade cap sizes every trade to nothing
+ *  (refused cleanly downstream as "buys no whole contract"), and a 0/hr rate
+ *  refuses every send. Negative and non-numeric values are not settings at all —
+ *  warn loudly once and fall back to the default, so a typo cannot silently
+ *  disable a limit or (worse) silently disable trading. */
+const warnedUserEnvs = new Set<string>();
+function userEnvCap(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    if (!warnedUserEnvs.has(name)) {
+      warnedUserEnvs.add(name);
+      warn(
+        `${name}=${JSON.stringify(raw)} is not a usable limit — falling back to ${fallback}. ` +
+          'Use 0 to disable deliberately; negative and non-numeric values are ignored.',
+      );
+    }
+    return fallback;
+  }
+  return n;
+}
+
 export function maxUserStake(): number {
-  const n = Number(process.env.SOMNUS_USER_MAX_TRADE ?? 1000);
-  return Number.isFinite(n) && n > 0 ? n : 1000;
+  return userEnvCap('SOMNUS_USER_MAX_TRADE', 1000);
 }
 
 /** Floor under the edge a caller's trade must hold, whatever they ask for.
@@ -91,8 +115,7 @@ export function userMinEdgeFloor(): number {
 /** Confirmed sends per token per hour. Bounds a runaway agent loop — the most
  *  likely way a caller loses their balance is their own client retrying. */
 export function userTradesPerHour(): number {
-  const n = Number(process.env.SOMNUS_USER_TRADES_PER_HOUR ?? 20);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 20;
+  return Math.floor(userEnvCap('SOMNUS_USER_TRADES_PER_HOUR', 20));
 }
 
 /** Windows priced per quote. Each one costs a book read on a request a caller is
@@ -552,29 +575,36 @@ export function sizingNote(
 const USER_MOM_BREAK_PP = Number(process.env.AGENT_MOM_BREAK_PP ?? 0.08);
 const USER_MOM_WINDOW_MS = Number(process.env.AGENT_MOM_WIN_MS ?? 600_000);
 
-/** Last-seen mids per window symbol — cross-call memory so the breaker sees a
- *  book collapse ACROSS quotes, which is exactly how the 2026-08-26 loss
+/** Last-seen mids per caller per window — cross-call memory so the breaker sees
+ *  a book collapse ACROSS quotes, which is exactly how the 2026-08-26 loss
  *  happened (three consecutive cycles re-rating a stampeding window as a
  *  bargain). The per-user path used to keep no such memory — every quote was
  *  stateless — so a caller re-quoting into a stampede was offered the same
- *  "bargain" each time while the operator's own cycle refused it. */
+ *  "bargain" each time while the operator's own cycle refused it.
+ *
+ *  Keyed by handle AND symbol: one caller's reads must never drive another
+ *  caller's safety breaker (or deny them the window by tripping it). */
 const userMidHistory = new Map<string, Array<{ ts: number; mid: number }>>();
 
 /** Record this book read and say whether the book has moved hard against an
  *  intended side since the earliest reading inside the window. Exported for tests. */
 export function userMomentumBlocked(
+  handle: string,
   symbol: string,
   mid: number | undefined,
   action: 'BUY_YES' | 'BUY_NO',
   now = Date.now(),
 ): { blocked: boolean; movedPp: number } {
-  const hist = (userMidHistory.get(symbol) ?? []).filter((h) => now - h.ts <= USER_MOM_WINDOW_MS);
+  const key = `${handle}:${symbol}`;
+  const hist = (userMidHistory.get(key) ?? []).filter((h) => now - h.ts <= USER_MOM_WINDOW_MS);
   const prevMid = hist.length > 0 ? hist[0]!.mid : undefined;
-  if (mid !== undefined) {
+  if (mid !== undefined && Number.isFinite(mid)) {
     hist.push({ ts: now, mid });
-    userMidHistory.set(symbol, hist.slice(-8));
+    userMidHistory.set(key, hist.slice(-8));
   }
-  if (prevMid === undefined || mid === undefined) return { blocked: false, movedPp: 0 };
+  if (prevMid === undefined || mid === undefined || !Number.isFinite(mid)) {
+    return { blocked: false, movedPp: 0 };
+  }
   return {
     blocked: momentumBreak(prevMid, mid, action, { moveThreshold: USER_MOM_BREAK_PP }),
     movedPp: (mid - prevMid) * 100,
@@ -599,6 +629,10 @@ async function priceWindow(
   ctx: SignalContext,
   stake: number,
   minEdge: number,
+  /** Caller handle for the momentum-breaker history. Omitted only when no
+   *  caller is on the request (never on the hosted path) — without it, reads
+   *  from different wallets would share one safety memory. */
+  handle?: string,
 ): Promise<{ quote?: UserQuote; skipped?: string }> {
   const book = await eventBook(market.symbol, 5);
   if (book.bid === undefined && book.ask === undefined) return { skipped: 'no book on this window' };
@@ -627,10 +661,12 @@ async function priceWindow(
   if (!fresh.ok) return { skipped: `stale market data: ${fresh.reason}` };
 
   // The tier scales both knobs, exactly as it does in the agent's cycle: an
-  // unproven horizon demands more edge and stakes less.
+  // unproven horizon demands more edge and stakes less. The calibration floor
+  // binds on top of both, so neither path can bet inside the model's noise.
   const budget = stake * policy.sizeMultiplier;
+  const edgeBar = Math.max(minEdge * policy.edgeMultiplier, policy.edgeFloor ?? 0);
   const decided = decideFromFair(est.fair, book, {
-    minEdge: minEdge * policy.edgeMultiplier,
+    minEdge: edgeBar,
     maxSize: budget,
   });
   if (decided.action !== 'BUY_YES' && decided.action !== 'BUY_NO') {
@@ -641,7 +677,12 @@ async function priceWindow(
   // cycle applies (see agent.ts). A book moving hard against the intended side
   // is more likely informed flow than a bargain the model alone can see, and
   // the model cannot see order flow at all.
-  const mom = userMomentumBlocked(market.symbol, book.mid ?? decided.mid, decided.action);
+  const mom = userMomentumBlocked(
+    handle ?? 'anon',
+    market.symbol,
+    book.mid ?? decided.mid,
+    decided.action,
+  );
   if (mom.blocked) {
     const side = decided.action === 'BUY_YES' ? 'Up' : 'Down';
     return {
@@ -702,7 +743,7 @@ async function priceWindow(
       sizingNote: sizingNote(stake, budget, cost, policy),
       payoutIfWin: contracts,
       edge: round4(fairForSide - quoted),
-      requiredEdge: round4(minEdge * policy.edgeMultiplier),
+      requiredEdge: round4(edgeBar),
       model: est.note,
       reason: `${decided.reason} — ${policy.note}`,
     },
@@ -786,6 +827,10 @@ export interface UserQuoteOpts {
   minEdge?: number;
   /** Assets to consider, e.g. ["BTC"]. Defaults to the operator's saved symbols. */
   symbols?: string[];
+  /** Caller handle: quotes then honour the caller's own tighter per-trade cap
+   *  (not just the server cap), and scope the momentum-breaker history to
+   *  their own reads. Anonymous when omitted. */
+  handle?: string;
   /** Called as each window is priced, so a caller sees the scan advance instead of
    *  waiting through a silent minute. Optional and best-effort — see `Report` in
    *  mcp/shared.ts. Nothing here changes behaviour when it is absent. */
@@ -800,7 +845,11 @@ export interface UserQuoteOpts {
  *  a book that moves and honouring a stale one buys at a price that no longer
  *  exists. */
 export async function quoteUserTrades(opts: UserQuoteOpts = {}): Promise<UserQuoteResult> {
-  const { stake, cap, clamped } = clampStake(opts.stake);
+  // The caller's own ceiling binds quotes exactly as it binds trades: a quote
+  // sized against the server cap while the trade would be sized against 50 is
+  // a promise the trade cannot keep.
+  const ownCap = opts.handle ? effectiveMaxStake(opts.handle).cap : undefined;
+  const { stake, cap, clamped } = clampStake(opts.stake, ownCap);
   const minEdge = resolveUserMinEdge(opts.minEdge);
   const mode = userTradingMode();
   const errors: string[] = [];
@@ -841,7 +890,7 @@ export async function quoteUserTrades(opts: UserQuoteOpts = {}): Promise<UserQuo
       candidates.length,
     );
     try {
-      const { quote, skipped } = await priceWindow(market, policy, ctx, stake, minEdge);
+      const { quote, skipped } = await priceWindow(market, policy, ctx, stake, minEdge, opts.handle);
       if (quote) quotes.push(quote);
       else passed.push({ window: market.symbol, reason: skipped ?? 'not tradeable' });
     } catch (err) {
@@ -987,6 +1036,7 @@ async function executeUserTrade(
       ctx,
       stake,
       minEdge,
+      identity.handle,
     );
     quote = priced.quote;
     why = priced.skipped ?? '';
@@ -997,6 +1047,7 @@ async function executeUserTrade(
       ...(opts.stake !== undefined ? { stake: opts.stake } : {}),
       ...(opts.minEdge !== undefined ? { minEdge: opts.minEdge } : {}),
       ...(opts.symbols !== undefined ? { symbols: opts.symbols } : {}),
+      handle: identity.handle,
       ...(opts.onProgress !== undefined ? { onProgress: opts.onProgress } : {}),
     });
     quote = scan.quotes[0];

@@ -150,12 +150,13 @@ export function registerUserTools(server: McpServer, resolve: IdentityResolver):
     },
     (args, extra) =>
       guard(async () => {
-        resolve();
+        const identity = resolve();
         return ok(
           await quoteUserTrades({
             ...(args.stake !== undefined ? { stake: args.stake } : {}),
             ...(args.minEdge !== undefined ? { minEdge: args.minEdge } : {}),
             ...(args.symbols !== undefined ? { symbols: args.symbols } : {}),
+            handle: identity.handle,
             onProgress: reporter(extra),
           }),
         );

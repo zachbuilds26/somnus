@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { effectiveDryRun, loadAgentConfig, sanitize, saveAgentConfig } from '../agent-config';
 import { runCycle } from '../services/agent';
-import { executeStandaloneDecision } from '../services/broker';
+import { executeStandaloneDecision, clampRunOverrides, runWithExecutionLock } from '../services/broker';
 import { loopStatus, startLoop, stopLoop } from '../services/loop';
 import { listPending, popPending } from '../services/pending';
 import { pauseTrading, resumeTrading, reviewAfterSettlement } from '../services/risk';
@@ -69,14 +69,38 @@ export function registerWriteTools(server: McpServer): void {
     },
     (args, extra) =>
       guard(async () => {
-        const out = await runCycle({
-          ...(args.maxTradeSize !== undefined ? { maxTradeSize: args.maxTradeSize } : {}),
-          ...(args.maxTrades !== undefined ? { maxTrades: args.maxTrades } : {}),
-          ...(args.minEdge !== undefined ? { minEdge: args.minEdge } : {}),
-          ...(args.symbols !== undefined ? { symbols: args.symbols } : {}),
-          requireConfirm: args.confirm !== true,
-          onProgress: reporter(extra),
-        });
+        // Per-run overrides may only tighten the saved rules, never widen them
+        // (H3): size caps at the saved maxTradeSize, count at 25, symbols at 20
+        // sanitised entries. See `clampRunOverrides` for the exact envelope.
+        const clamped = clampRunOverrides(
+          {
+            maxTradeSize: args.maxTradeSize,
+            maxTrades: args.maxTrades,
+            minEdge: args.minEdge,
+            symbols: args.symbols,
+          },
+          loadAgentConfig(),
+        );
+        // Serialised against confirms and other cycles through the broker's
+        // shared execution lock (H1).
+        const out = await runWithExecutionLock(() =>
+          runCycle({
+            ...clamped,
+            requireConfirm: args.confirm !== true,
+            onProgress: reporter(extra),
+          }),
+        );
+        // The per-run trade cap binds pending creation too (M4): without this a
+        // "do N trades" scan could return more than N confirmable asks, and each
+        // confirm re-baselines on its own — so the count cap would never fire
+        // across confirms. Excess candidates are dropped from the map as well as
+        // the response, so they cannot be confirmed by id afterwards.
+        if (clamped.maxTrades !== undefined) {
+          while (out.pending.length > clamped.maxTrades) {
+            const dropped = out.pending.pop();
+            if (dropped) popPending(dropped.id);
+          }
+        }
         return ok({
           dryRun: effectiveDryRun(),
           decisions: out.decisions.map((d) => ({

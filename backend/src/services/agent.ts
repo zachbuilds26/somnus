@@ -279,8 +279,11 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
 
       // Tier scales what the agent demands and what it stakes. On a validated
       // horizon both multipliers are 1 and this is exactly the operator's rules.
+      // The calibration floor binds on top: no bar may sit below twice the
+      // class's measured error, or the trade bets inside the model's own noise.
+      const edgeBar = Math.max(rules.minEdge * policy.edgeMultiplier, policy.edgeFloor ?? 0);
       const r = decideFromFair(fairRes.fair, book, {
-        minEdge: rules.minEdge * policy.edgeMultiplier,
+        minEdge: edgeBar,
         maxSize: rules.maxTradeSize * policy.sizeMultiplier,
       });
 
@@ -313,7 +316,7 @@ async function executeCycle(opts?: RunOpts): Promise<CycleResult> {
         size: r.size,
         horizon: policy.label,
         horizonTier: policy.tier,
-        requiredEdge: round4(rules.minEdge * policy.edgeMultiplier),
+        requiredEdge: round4(Math.max(rules.minEdge * policy.edgeMultiplier, policy.edgeFloor ?? 0)),
         // How old every input behind this decision was. The broker refuses to act
         // on anything past `maxDataAgeMs`; recording the ages means a later study
         // can also tell a good call from a lucky one made on stale data.

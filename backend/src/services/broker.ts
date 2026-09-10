@@ -182,6 +182,77 @@ export function tradeBudget(maxTradeSize: number, maxOpenNotional: number, openN
   return Math.max(0, Math.min(maxTradeSize, remaining));
 }
 
+/** Per-run execution overrides, as supplied by a caller (HTTP body, MCP args).
+ *  Deliberately loose: raw caller input arrives unchecked, and clamping — not
+ *  rejecting — is the response, so the saved rules simply govern whatever is
+ *  invalid. */
+export interface RunOverrideOpts {
+  maxTrades?: unknown;
+  maxTradeSize?: unknown;
+  minEdge?: unknown;
+  symbols?: unknown;
+}
+
+/** Per-run overrides with every widening vector removed (H3).
+ *
+ *  A per-run override may only TIGHTEN the saved rules, never widen them: the
+ *  saved document is the operator's audited mandate, and a single request must
+ *  not be able to hand the agent a bigger one. So the per-trade size caps at the
+ *  saved maxTradeSize (the saved envelope itself still clamps at 10000 via
+ *  sanitize), the per-run trade count caps at 25, and the symbol filter caps at
+ *  20 entries (non-strings dropped, each sliced to 128 chars, empties dropped).
+ *  Anything invalid is omitted rather than erroring, so the saved rules govern.
+ *
+ *  Pure + exported so the rule is pinned by tests. Applied at every entry that
+ *  accepts overrides (the HTTP + MCP call sites, and `beginCycle` itself as the
+ *  choke point) — idempotent, so clamping twice is the same as clamping once. */
+export function clampRunOverrides(
+  opts: RunOverrideOpts,
+  saved: Pick<AgentConfigDoc, 'maxTradeSize'>,
+): { maxTrades?: number; maxTradeSize?: number; minEdge?: number; symbols?: string[] } {
+  const out: { maxTrades?: number; maxTradeSize?: number; minEdge?: number; symbols?: string[] } = {};
+  const size = Number(opts.maxTradeSize);
+  if (Number.isFinite(size) && size > 0 && saved.maxTradeSize > 0) {
+    out.maxTradeSize = Math.min(size, saved.maxTradeSize);
+  }
+  const trades = Number(opts.maxTrades);
+  if (Number.isFinite(trades) && trades > 0) {
+    out.maxTrades = Math.min(Math.floor(trades), 25);
+  }
+  // Passed through when positive: a per-run edge bar is how a caller asks for a
+  // stricter cycle. Zero/negative would only ever LOOSEN the saved bar, so it is
+  // dropped and the saved rule governs.
+  const edge = Number(opts.minEdge);
+  if (Number.isFinite(edge) && edge > 0) out.minEdge = edge;
+  if (Array.isArray(opts.symbols)) {
+    const cleaned = opts.symbols
+      .filter((s): s is string => typeof s === 'string')
+      .map((s) => s.slice(0, 128))
+      .filter((s) => s.length > 0)
+      .slice(0, 20);
+    if (cleaned.length > 0) out.symbols = cleaned;
+  }
+  return out;
+}
+
+/** Age a scan-time reading by the time spent queued. `undefined` stays
+ *  `undefined` (unknown, which the freshness gate treats as stale) — adding a
+ *  number to an unknown age would invent precision we do not have. */
+function addAge(ageMs: number | undefined, queueMs: number): number | undefined {
+  return ageMs === undefined ? undefined : ageMs + queueMs;
+}
+
+/** A receipt carried on a thrown order error, if any. Viem-flavoured failures
+ *  surface it under several shapes, so check the known ones rather than one. */
+function receiptFromError(err: unknown): unknown {
+  const e = err as Record<string, unknown> | null;
+  if (!e || typeof e !== 'object') return undefined;
+  const info = e.info as Record<string, unknown> | undefined;
+  const cause = e.cause as Record<string, unknown> | undefined;
+  const causeInfo = cause?.info as Record<string, unknown> | undefined;
+  return e.receipt ?? info?.receipt ?? cause?.receipt ?? causeInfo?.receipt;
+}
+
 /** The hard gate between "the agent wants to trade" and the chain.
  *  - Every order passes config limits even if the decision doesn't.
  *  - dryRun (default) → simulated order logged + proof-linked, no tx.
@@ -190,8 +261,23 @@ export async function executeDecision(decision: Decision): Promise<OrderLog> {
   // Re-read the saved rules on every order: these are the limits the operator
   // actually wrote, not the process-start env snapshot. A per-run override
   // (e.g. "do 3 trades of $4 each") layers on top for this cycle only.
-  const rules: AgentConfigDoc = { ...loadAgentConfig(), ...cycleRulesOverride };
-  const dryRun = effectiveDryRun(rules);
+  let rules: AgentConfigDoc = { ...loadAgentConfig(), ...cycleRulesOverride };
+  let dryRun = effectiveDryRun(rules);
+
+  // Cycle-pinned dry-run (H6): the exposure baselines below were established by
+  // `beginCycle` under one mode, and a dry-run baseline is all zeroes (there is
+  // no real exposure). If the mode flipped mid-cycle — the operator saved live
+  // while a dry-run cycle was still executing — proceeding would trade LIVE
+  // against zero baselines, i.e. with every exposure cap effectively off.
+  // Re-baseline under the current mode first (replaying the cycle's effective
+  // overrides, so per-run limits survive the flip); the flip itself is rare, so
+  // the extra reads cost nothing in steady state. Runs BEFORE any gate so even
+  // a rejection is judged against the right baselines.
+  if (cycleDryRun !== undefined && cycleDryRun !== dryRun) {
+    await beginCycle(dryRun, cycleOpts);
+    rules = { ...loadAgentConfig(), ...cycleRulesOverride };
+    dryRun = effectiveDryRun(rules);
+  }
 
   const reject = async (reason: string, routed?: ExecutionTarget): Promise<OrderLog> => {
     const logEntry = buildOrder(decision, 'rejected', reason, dryRun, routed);
@@ -215,7 +301,35 @@ export async function executeDecision(decision: Decision): Promise<OrderLog> {
   const risk = riskStatus(rules);
   if (!risk.ok) return reject(`blocked by risk controls: ${risk.blocked.join('; ')}`);
 
-  const fresh = dataFresh(decision.freshness, rules.maxDataAgeMs);
+  // Queue delay (H2): the ages on the decision were frozen when it was taken,
+  // but the order is placed now — every millisecond in between is age the gate
+  // never saw. A cycle that waits ~10s per chain confirmation would otherwise
+  // execute its tail on data older than its own freshness rule allows, so the
+  // queue time is added to each recorded age before judging. Fail closed when
+  // the delay cannot be bounded: a missing or far-future timestamp means we
+  // cannot show how old the data is, and refusing is the safe response to an
+  // unmeasurable age.
+  const nowMs = Date.now();
+  const decidedTs = (decision as { ts?: unknown }).ts;
+  if (typeof decidedTs !== 'number' || !Number.isFinite(decidedTs)) {
+    return reject('decision has no timestamp — queue delay is unbounded, refusing to trade on unmeasurable data age');
+  }
+  if (decidedTs - nowMs > 60_000) {
+    return reject(
+      `decision timestamp is ${Math.round((decidedTs - nowMs) / 1000)}s in the future — ` +
+        'queue delay is unbounded, refusing',
+    );
+  }
+  const queueMs = Math.max(0, nowMs - decidedTs);
+  const agedFreshness: Decision['freshness'] =
+    decision.freshness === undefined
+      ? undefined
+      : {
+          spotAgeMs: addAge(decision.freshness.spotAgeMs, queueMs),
+          candleAgeMs: addAge(decision.freshness.candleAgeMs, queueMs),
+          bookAgeMs: addAge(decision.freshness.bookAgeMs, queueMs),
+        };
+  const fresh = dataFresh(agedFreshness, rules.maxDataAgeMs);
   if (!fresh.ok) return reject(`stale market data: ${fresh.reason}`);
 
   // The decision quotes the window in YES terms: the ask for an Up buy, the bid
@@ -464,6 +578,14 @@ export async function executeDecision(decision: Decision): Promise<OrderLog> {
     return live;
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
+    // Revert-path gas (L1): a reverted order still paid gas, and the ledger must
+    // show the cost of running the agent, not just the cost of its fills.
+    // Best-effort: only some failures carry a receipt (the `order reverted
+    // on-chain` throw in sdk-live discards its own, and a simulation revert
+    // spent nothing at all), so an absent receipt books nothing rather than
+    // guessing a number.
+    const revertGas = gasCostFromReceipt(receiptFromError(err));
+    if (revertGas !== undefined) recordGas(revertGas, `live order failed: ${msg.slice(0, 120)}`);
     // An IOC that finds nothing reverts `ImmediateOrCancelNoFill()`. That is the
     // book moving between our read and our send — normal taker behaviour, not a
     // malfunction. Label it plainly so the audit trail doesn't read as breakage.
@@ -509,6 +631,43 @@ let cycleRequestedTrades: number | undefined;
 /** Per-run rule overrides (size/edge/symbols) layered on top of the saved config
  *  for this cycle only — never written back to disk. */
 let cycleRulesOverride: Partial<AgentConfigDoc> | undefined;
+/** Mode this cycle's exposure baselines were established under (H6). `undefined`
+ *  until the first `beginCycle`: no cycle, no snapshot, nothing to compare. */
+let cycleDryRun: boolean | undefined;
+/** This cycle's effective per-run overrides, so a mode-flip re-baseline can
+ *  replay exactly what the cycle started with rather than dropping them. */
+let cycleOpts: { maxTrades?: number; maxTradeSize?: number; minEdge?: number; symbols?: string[] } | undefined;
+
+/** The shared execution lock — one queue for the loop cycle and for manual
+ *  confirms (H1), and for the check-then-act sequences around risk-state.json
+ *  and the trade quota (M2).
+ *
+ *  The hazard: `beginCycle` RESETS the exposure counters, so a confirm that
+ *  re-baselines mid-cycle wipes what the in-flight cycle already counted, and
+ *  the position caps stop binding. A confirm must therefore wait for an
+ *  in-flight cycle (then re-baseline against reality) and vice versa — which a
+ *  private confirm-only gate cannot provide, since it serialises confirms
+ *  against each other but not against the cycle.
+ *
+ *  Same promise-chain pattern as the proof store's append queue: the next
+ *  holder runs when the previous one settles, and one holder's rejection never
+ *  wedges the queue.
+ *
+ *  Deadlock rule: NEVER re-enter. Neither `beginCycle` nor `executeDecision`
+ *  acquires this lock — only the outermost entries do (the runCycle call sites
+ *  in loop/routes/MCP, and `executeStandaloneDecision`). A gated function that
+ *  called another gated function would wait on itself forever. The risk-state
+ *  and quota bodies stay synchronous (read+modify+write with no await between,
+ *  hence atomic on this event loop) and are called only from inside these
+ *  holders, so the check-then-act around them is serialised without nesting. */
+let executionTail: Promise<unknown> = Promise.resolve();
+
+export function runWithExecutionLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = executionTail.then(fn);
+  // Keep the queue alive even if one holder rejects.
+  executionTail = run.catch(() => undefined);
+  return run;
+}
 /** Open exposure per marketId at cycle start; accepted orders increment their
  *  entry so `maxPerMarket` binds within a single cycle too. */
 let openByMarket = new Map<string, number>();
@@ -544,12 +703,29 @@ export async function beginCycle(
     symbols?: string[];
   },
 ): Promise<void> {
-  cycleRequestedTrades = opts?.maxTrades;
+  // Per-run overrides may only tighten the saved rules, never widen them (H3) —
+  // clamped here at the single choke point every cycle passes through, so the
+  // guarantee holds however the caller was reached. The HTTP and MCP entries
+  // clamp again up front so the operator sees the effective values early;
+  // clamping is idempotent, so twice is the same as once.
+  const clamped = clampRunOverrides(opts ?? {}, loadAgentConfig());
+  cycleRequestedTrades = clamped.maxTrades;
   const o: Partial<AgentConfigDoc> = {};
-  if (opts?.maxTradeSize !== undefined) o.maxTradeSize = opts.maxTradeSize;
-  if (opts?.minEdge !== undefined) o.minEdge = opts.minEdge;
-  if (opts?.symbols !== undefined) o.symbols = opts.symbols;
+  if (clamped.maxTradeSize !== undefined) o.maxTradeSize = clamped.maxTradeSize;
+  if (clamped.minEdge !== undefined) o.minEdge = clamped.minEdge;
+  if (clamped.symbols !== undefined) o.symbols = clamped.symbols;
   cycleRulesOverride = Object.keys(o).length > 0 ? o : undefined;
+  // Pin the mode and the effective overrides for this cycle (H6): if the mode
+  // flips before the cycle's orders land, `executeDecision` re-baselines rather
+  // than trading against baselines established under the other mode.
+  cycleDryRun = dryRun;
+  cycleOpts =
+    clamped.maxTrades === undefined &&
+    clamped.maxTradeSize === undefined &&
+    clamped.minEdge === undefined &&
+    clamped.symbols === undefined
+      ? undefined
+      : { ...clamped };
   openedThisCycle = 0;
   openedNotionalThisCycle = 0;
   openByExpiry = new Map();
@@ -629,20 +805,22 @@ function openPositionCount(): number {
  *  Two things fix it, and both are needed:
  *   - re-establish the baselines from real chain and ledger state before the order,
  *     so the limits are measured against reality rather than a stale snapshot;
- *   - serialise, because two confirms arriving together would each read the same
- *     baseline and each believe it had room. That is the same failure the cycle
+ *   - serialise against the loop cycle through the SHARED execution lock, because
+ *     two confirms arriving together would each read the same baseline and each
+ *     believe it had room — and a confirm landing mid-cycle would wipe the
+ *     cycle's counters via `beginCycle`. That is the same failure the cycle
  *     guard already prevents for the automatic path.                            */
-let standaloneGate: Promise<unknown> = Promise.resolve();
-
 export function executeStandaloneDecision(decision: Decision): Promise<OrderLog> {
-  const run = standaloneGate.then(async () => {
+  // Through `runWithExecutionLock`, never a private gate: a confirm-only queue
+  // serialises confirms against each other but not against the loop cycle,
+  // which is exactly the interleaving that wiped the counters (H1). Waiting for
+  // an in-flight cycle and THEN re-baselining means the limits are measured
+  // against what the cycle already placed.
+  return runWithExecutionLock(async () => {
     const rules = loadAgentConfig();
     await beginCycle(effectiveDryRun(rules));
     return executeDecision(decision);
   });
-  // Keep the queue alive even if one order rejects.
-  standaloneGate = run.catch(() => undefined);
-  return run;
 }
 
 /** Collateral at risk right now: positions carried into this cycle plus whatever
@@ -690,3 +868,37 @@ function buildOrder(
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
+
+/** Test-only introspection for the execution-safety suite. Reads module state
+ *  without exposing a way to rewrite limits — the counters stay writeable only
+ *  through `beginCycle` and order acceptance, exactly as in production. */
+export const __brokerInternals = {
+  /** This cycle's mode snapshot plus the in-cycle exposure counters. */
+  cycleSnapshot: (): {
+    dryRun: boolean | undefined;
+    openedThisCycle: number;
+    openedNotionalThisCycle: number;
+    openBaseline: number;
+    openNotionalBaseline: number;
+  } => ({
+    dryRun: cycleDryRun,
+    openedThisCycle,
+    openedNotionalThisCycle,
+    openBaseline,
+    openNotionalBaseline,
+  }),
+  /** Stand in for one accepted order, so interleaving tests can put the counters
+   *  in a non-zero state without placing anything or touching the wallet cache. */
+  simulateAcceptedOrder: (notional: number): void => {
+    openedThisCycle++;
+    openedNotionalThisCycle += notional;
+  },
+  /** This cycle's effective per-run overrides, as clamped by `beginCycle`. */
+  cycleOverrides: (): {
+    requestedTrades: number | undefined;
+    rules: Partial<AgentConfigDoc>;
+  } => ({
+    requestedTrades: cycleRequestedTrades,
+    rules: { ...cycleRulesOverride },
+  }),
+};

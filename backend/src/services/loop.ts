@@ -1,10 +1,11 @@
 import { debug, log, warn } from '../config';
 import { effectiveDryRun, loadAgentConfig } from '../agent-config';
 import { isCycleInFlight, runCycle } from './agent';
+import { runWithExecutionLock } from './broker';
 import { riskStatus } from './risk';
 import { feedHealthReport, probeFeeds, resetReadExchange, tickFeedHealth } from './sdk';
 import { sweepSettlements } from './settlement';
-import { checkClockSkew } from './clock';
+import { checkClockSkew, clockMeasured } from './clock';
 import { raiseAlert } from './alerts';
 import { publish } from './events';
 
@@ -175,7 +176,12 @@ async function tick(gen: number): Promise<void> {
       });
     }
 
-    const out = await withTimeout(runCycle(), CYCLE_TIMEOUT_MS);
+    // Serialised against manual confirms through the broker's shared execution
+    // lock (H1): the cycle's exposure counters live in the broker and reset in
+    // `beginCycle`, so a confirm that re-baselines mid-cycle would wipe what
+    // this cycle already counted. A confirm arriving now waits, then re-baselines
+    // against what this cycle placed.
+    const out = await withTimeout(runWithExecutionLock(() => runCycle()), CYCLE_TIMEOUT_MS);
     cycles++;
     lastRunAt = Date.now();
     lastSummary =
@@ -315,12 +321,20 @@ export async function waitForIdle(timeoutMs = 30_000): Promise<boolean> {
 }
 
 /** Opt-in autostart. Defaults OFF: a process that starts trading the moment it
- *  boots is the wrong default for something holding a key. */
+ *  boots is the wrong default for something holding a key. Never starts on an
+ *  unmeasured clock: every expiry decision is host-clock arithmetic, so a skew
+ *  nobody has measured yet is a blindfold, not a green light. */
 export function maybeAutostart(): void {
   const raw = (process.env.AGENT_AUTOSTART ?? '').toLowerCase();
   if (raw === 'true' || raw === '1') {
-    log('AGENT_AUTOSTART set — starting agent loop');
-    startLoop();
+    void checkClockSkew(true).then(() => {
+      if (!clockMeasured()) {
+        warn('AGENT_AUTOSTART set but the clock is unmeasured — loop NOT started');
+        return;
+      }
+      log('AGENT_AUTOSTART set — starting agent loop');
+      startLoop();
+    });
   }
 }
 

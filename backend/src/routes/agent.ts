@@ -11,7 +11,7 @@ import { appendEntry, currentAnchor, readChainPage } from '../services/store';
 import { pnlSummary, pnlRecent, verifyLedgerAgainstChain } from '../services/pnl';
 import { buildPerformanceReport } from '../services/report';
 import { listPending, popPending } from '../services/pending';
-import { executeStandaloneDecision } from '../services/broker';
+import { executeStandaloneDecision, clampRunOverrides, runWithExecutionLock } from '../services/broker';
 import type { AgentConfigDoc } from '../types';
 
 export const agentRouter: Router = Router();
@@ -108,15 +108,15 @@ agentRouter.post('/agent/run', async (req, res) => {
 
     const opts: RunOpts = {};
     if (hasPreset) opts.edgePreset = String(b.edgePreset).toLowerCase() as RunOpts['edgePreset'];
-    const maxTrades = Number(b.maxTrades);
-    if (Number.isFinite(maxTrades) && maxTrades > 0) opts.maxTrades = Math.floor(maxTrades);
-    const size = Number(b.maxTradeSize);
-    if (Number.isFinite(size) && size > 0) opts.maxTradeSize = size;
-    const edge = Number(b.minEdge);
-    if (Number.isFinite(edge) && edge > 0) opts.minEdge = edge;
-    if (Array.isArray(b.symbols) && b.symbols.length > 0) {
-      opts.symbols = b.symbols.map((s: unknown) => String(s).toUpperCase());
-    }
+    // Per-run overrides may only tighten the saved rules, never widen them (H3):
+    // size caps at the saved maxTradeSize, count at 25, symbols at 20 sanitised
+    // entries. See `clampRunOverrides` for the exact envelope.
+    const clamped = clampRunOverrides(
+      { maxTrades: b.maxTrades, maxTradeSize: b.maxTradeSize, minEdge: b.minEdge, symbols: b.symbols },
+      loadAgentConfig(),
+    );
+    Object.assign(opts, clamped);
+    if (opts.symbols) opts.symbols = opts.symbols.map((s) => s.toUpperCase());
 
     // Autotrade vs Manual — if they picked autotrade, start the loop that
     // hunts by itself and auto-claims, no per-trade ask.
@@ -152,7 +152,22 @@ agentRouter.post('/agent/run', async (req, res) => {
     // "restore parity" here by honouring a body flag without deciding that on purpose.
     opts.requireConfirm = true;
 
-    const out = await runCycle(Object.keys(opts).length > 0 ? opts : undefined);
+    // Serialised against confirms and other cycles through the broker's shared
+    // execution lock (H1): this cycle's exposure counters reset in `beginCycle`,
+    // so it must not interleave with a confirm doing the same.
+    const out = await runWithExecutionLock(() => runCycle(Object.keys(opts).length > 0 ? opts : undefined));
+
+    // The per-run trade cap binds pending creation too (M4): without this a
+    // "do N trades" scan could return more than N confirmable asks, and each
+    // confirm re-baselines on its own — so the count cap would never fire
+    // across confirms. Excess candidates are dropped from the map as well as
+    // the response, so they cannot be confirmed by id afterwards.
+    if (opts.maxTrades !== undefined) {
+      while (out.pending.length > opts.maxTrades) {
+        const dropped = out.pending.pop();
+        if (dropped) popPending(dropped.id);
+      }
+    }
 
     if (out.pending.length > 0) {
       const asks = out.pending.map((p) => ({

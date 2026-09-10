@@ -413,7 +413,16 @@ export function resumeTrading(opts: { clearFailures?: boolean } = {}): RiskStatu
 }
 
 /** Count one live attempt that produced no position, and pause if that crosses
- *  the limit. Returns the new count. */
+ *  the limit. Returns the new count.
+ *
+ *  Locking note (M2): this body stays synchronous on purpose — read, modify and
+ *  write happen with no await between them, so one call cannot interleave with
+ *  another on this event loop. The race that mattered was the check-then-act
+ *  AROUND the call (quota/risk read, network awaits, then consume/record), and
+ *  that is serialised by the broker's shared execution lock, which every
+ *  production path through here holds. Do not await the broker lock from here:
+ *  besides turning a sync audit write async, risk -> broker -> risk would wait
+ *  on itself. */
 export function recordExecutionFailure(reason: string): number {
   const state = readState();
   const next: RiskStateDoc = {
